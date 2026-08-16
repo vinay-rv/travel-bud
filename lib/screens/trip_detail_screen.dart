@@ -142,25 +142,25 @@ class _TripDetailScreenState extends State<TripDetailScreen>
   Widget? _buildFab() {
     switch (_tabController.index) {
       case 0:
-        return FloatingActionButton.extended(
+        return AppFab(
           heroTag: 'add-stay',
           onPressed: _addStay,
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('Add Stay'),
+          icon: Icons.add_rounded,
+          label: 'Add Stay',
         );
       case 1:
-        return FloatingActionButton.extended(
+        return AppFab(
           heroTag: 'add-transport',
           onPressed: _addTransport,
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('Add Transport'),
+          icon: Icons.add_rounded,
+          label: 'Add Transport',
         );
       case 2:
-        return FloatingActionButton.extended(
+        return AppFab(
           heroTag: 'add-item',
           onPressed: _addItem,
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('Add Item'),
+          icon: Icons.add_rounded,
+          label: 'Add Item',
         );
       default:
         return null;

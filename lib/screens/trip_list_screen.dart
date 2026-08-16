@@ -89,10 +89,11 @@ class _TripListScreenState extends State<TripListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.canvas,
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: AppFab(
+        heroTag: 'plan-trip',
         onPressed: _createTrip,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('Plan a trip'),
+        icon: Icons.add_rounded,
+        label: 'Plan a trip',
       ),
       body: AppBackground(
         child: SafeArea(

@@ -441,14 +441,21 @@ Future<bool> confirmDestructive(
           onPressed: () => Navigator.of(context).pop(false),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.rose,
-            foregroundColor: const Color(0xFF2A0A11),
-            minimumSize: const Size(0, 44),
+        _GradientButtonSurface(
+          gradient: AppGradients.destructiveButton,
+          radius: AppRadius.md,
+          filled: true,
+          child: FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              shadowColor: Colors.transparent,
+              elevation: 0,
+              minimumSize: const Size(0, 46),
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(confirmLabel),
           ),
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(confirmLabel),
         ),
       ],
     ),
@@ -604,25 +611,141 @@ class _FormFooter extends StatelessWidget {
         color: AppColors.canvas,
         border: Border(top: BorderSide(color: AppColors.border)),
       ),
+      child: AppPrimaryButton(
+        label: label,
+        icon: Icons.arrow_forward_rounded,
+        loading: saving,
+        onPressed: onPressed,
+      ),
+    );
+  }
+}
+
+/// Shared chrome for a gradient call-to-action: the fill plus a hairline lit
+/// top edge. Deliberately flat — no drop shadow — because every other surface
+/// in the app is flat with a hairline border. When [filled] is false it falls
+/// back to the inert disabled surface.
+class _GradientButtonSurface extends StatelessWidget {
+  final Widget child;
+  final Gradient gradient;
+  final double radius;
+  final bool filled;
+
+  const _GradientButtonSurface({
+    required this.child,
+    required this.gradient,
+    required this.radius,
+    required this.filled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        gradient: filled ? gradient : null,
+        color: filled ? null : AppColors.surfaceHigh,
+        border: Border.all(
+          color: filled ? AppGradients.buttonHighlight : AppColors.border,
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// The app's primary call to action, used for the pinned save button on every
+/// form. Wraps a real [FilledButton] (transparent, so the gradient shows
+/// through) to keep Material's ink, focus, and disabled semantics.
+class AppPrimaryButton extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool loading;
+  final VoidCallback? onPressed;
+
+  const AppPrimaryButton({
+    super.key,
+    required this.label,
+    this.icon,
+    this.loading = false,
+    this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tappable = onPressed != null && !loading;
+
+    return _GradientButtonSurface(
+      gradient: AppGradients.primaryButton,
+      radius: AppRadius.md,
+      // A save in flight keeps its fill — it's busy, not disabled.
+      filled: onPressed != null,
       child: FilledButton(
-        onPressed: saving ? null : onPressed,
-        child: saving
+        onPressed: tappable ? onPressed : null,
+        style: FilledButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          disabledBackgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+        ),
+        child: loading
             ? const SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.2,
-                  color: AppColors.textFaint,
+                  color: Colors.white,
                 ),
               )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(label),
-                  const SizedBox(width: AppSpacing.sm),
-                  const Icon(Icons.arrow_forward_rounded, size: 18),
+                  if (icon != null) ...[
+                    const SizedBox(width: AppSpacing.sm),
+                    Icon(icon, size: 18),
+                  ],
                 ],
               ),
+      ),
+    );
+  }
+}
+
+/// Extended FAB with the same gradient fill as [AppPrimaryButton], so the two
+/// primary actions in the app read as one control.
+class AppFab extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final String heroTag;
+  final VoidCallback onPressed;
+
+  const AppFab({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.heroTag,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _GradientButtonSurface(
+      gradient: AppGradients.primaryButton,
+      radius: AppRadius.md,
+      filled: true,
+      child: FloatingActionButton.extended(
+        heroTag: heroTag,
+        onPressed: onPressed,
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        focusElevation: 0,
+        hoverElevation: 0,
+        highlightElevation: 0,
+        icon: Icon(icon),
+        label: Text(label),
       ),
     );
   }

@@ -31,6 +31,29 @@ class AppColors {
 }
 
 /// Corner radii, in one place so cards, fields, and sheets stay in step.
+/// Fills for the primary call-to-action surfaces. Buttons are the one place
+/// the UI carries a solid fill, so they use a deep gradient with white text
+/// rather than a flat saturated slab — loud enough to lead, quiet enough to
+/// sit next to the tinted cards and pills.
+class AppGradients {
+  AppGradients._();
+
+  static const primaryButton = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFF6379EA), Color(0xFF4257CE)],
+  );
+
+  static const destructiveButton = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [Color(0xFFD75C72), Color(0xFFB93E55)],
+  );
+
+  /// Hairline highlight along the top edge, so the fill reads as lit.
+  static const buttonHighlight = Color(0x26FFFFFF);
+}
+
 class AppRadius {
   AppRadius._();
 
@@ -218,8 +241,10 @@ ThemeData buildAppTheme() {
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: AppColors.primary,
-        foregroundColor: const Color(0xFF0B1020),
+        // Bare FilledButtons fall back to the flat deep fill; the gradient
+        // treatment comes from AppPrimaryButton.
+        backgroundColor: AppColors.primaryDeep,
+        foregroundColor: Colors.white,
         disabledBackgroundColor: AppColors.surfaceHigh,
         disabledForegroundColor: AppColors.textFaint,
         minimumSize: const Size.fromHeight(54),
@@ -241,8 +266,8 @@ ThemeData buildAppTheme() {
       ),
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
-      backgroundColor: AppColors.primary,
-      foregroundColor: const Color(0xFF0B1020),
+      backgroundColor: AppColors.primaryDeep,
+      foregroundColor: Colors.white,
       elevation: 0,
       focusElevation: 0,
       hoverElevation: 0,
