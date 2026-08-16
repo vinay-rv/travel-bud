@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../data/database_helper.dart';
 import '../models/trip.dart';
+import '../theme/app_theme.dart';
 import '../utils/date_format.dart';
+import '../utils/trip_status.dart';
+import '../widgets/ui.dart';
 
 /// Create a new trip (when [existing] is null) or edit an existing one.
 /// Pops with the saved [Trip] on success, or null if cancelled.
@@ -34,8 +37,7 @@ class _TripEditScreenState extends State<TripEditScreen> {
     _nameController = TextEditingController(text: existing?.name ?? '');
     final now = DateTime.now();
     _startDate = existing?.startDate ?? DateTime(now.year, now.month, now.day);
-    _endDate =
-        existing?.endDate ?? _startDate.add(const Duration(days: 1));
+    _endDate = existing?.endDate ?? _startDate.add(const Duration(days: 1));
   }
 
   @override
@@ -50,6 +52,7 @@ class _TripEditScreenState extends State<TripEditScreen> {
       initialDate: _startDate,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
+      helpText: 'Departure date',
     );
     if (picked == null) return;
     setState(() {
@@ -67,6 +70,7 @@ class _TripEditScreenState extends State<TripEditScreen> {
       initialDate: _endDate.isBefore(_startDate) ? _startDate : _endDate,
       firstDate: _startDate,
       lastDate: DateTime(2100),
+      helpText: 'Return date',
     );
     if (picked == null) return;
     setState(() => _endDate = picked);
@@ -96,31 +100,39 @@ class _TripEditScreenState extends State<TripEditScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save trip: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not save trip: $e')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.isEditing ? 'Edit Trip' : 'New Trip'),
-      ),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+    final days = tripLengthInDays(_startDate, _endDate);
+
+    return AppFormScaffold(
+      formKey: _formKey,
+      title: widget.isEditing ? 'Edit trip' : 'New trip',
+      subtitle: widget.isEditing
+          ? 'Update the name or the dates'
+          : 'Where are you heading next?',
+      icon: Icons.explore_rounded,
+      actionLabel: widget.isEditing ? 'Save changes' : 'Create trip',
+      saving: _saving,
+      onAction: _save,
+      children: [
+        FormSection(
+          label: 'Destination',
           children: [
             TextFormField(
               controller: _nameController,
               autofocus: !widget.isEditing,
               textCapitalization: TextCapitalization.words,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               decoration: const InputDecoration(
                 labelText: 'Trip name',
                 hintText: 'e.g. Northeast India',
-                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.place_outlined),
               ),
               validator: (value) {
                 if (value == null || value.trim().isEmpty) {
@@ -129,60 +141,48 @@ class _TripEditScreenState extends State<TripEditScreen> {
                 return null;
               },
             ),
-            const SizedBox(height: 16),
-            _DateField(
+          ],
+        ),
+        FormSection(
+          label: 'Dates',
+          children: [
+            AppPickerField(
               label: 'Start date',
               value: formatDate(_startDate),
+              icon: Icons.flight_takeoff_rounded,
               onTap: _pickStartDate,
             ),
-            const SizedBox(height: 12),
-            _DateField(
+            const SizedBox(height: AppSpacing.md),
+            AppPickerField(
               label: 'End date',
               value: formatDate(_endDate),
+              icon: Icons.flight_land_rounded,
               onTap: _pickEndDate,
             ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: _saving ? null : _save,
-              icon: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.check),
-              label: Text(widget.isEditing ? 'Save changes' : 'Create trip'),
+            const SizedBox(height: AppSpacing.lg),
+            Row(
+              children: [
+                AppPill(
+                  label: '$days day${days == 1 ? '' : 's'}',
+                  icon: Icons.event_available_rounded,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                AppPill(
+                  label: days == 1
+                      ? 'Day trip'
+                      : '${days - 1} night${days - 1 == 1 ? '' : 's'}',
+                  color: AppColors.mint,
+                  icon: Icons.bedtime_outlined,
+                ),
+              ],
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _DateField extends StatelessWidget {
-  final String label;
-  final String value;
-  final VoidCallback onTap;
-
-  const _DateField({
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          suffixIcon: const Icon(Icons.calendar_today),
+        const FormHint(
+          'Stays, transport, packing items, and documents all hang off this '
+          'trip, so you can set the dates roughly and refine them later.',
         ),
-        child: Text(value, style: Theme.of(context).textTheme.bodyLarge),
-      ),
+      ],
     );
   }
 }

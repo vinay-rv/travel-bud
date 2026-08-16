@@ -1,4 +1,4 @@
-package com.vinayrv.trip_inventory_tracker
+package com.vinayrv.packmate
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import 'package:trip_inventory_tracker/data/database_helper.dart';
-import 'package:trip_inventory_tracker/models/trip.dart';
-import 'package:trip_inventory_tracker/screens/trip_list_screen.dart';
+import 'package:packmate/data/database_helper.dart';
+import 'package:packmate/models/trip.dart';
+import 'package:packmate/screens/trip_list_screen.dart';
 
 /// These screens read from a real (in-memory, FFI) database whose futures
 /// resolve on the *real* event loop, not flutter_test's fake-async zone.

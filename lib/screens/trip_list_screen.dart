@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../data/database_helper.dart';
 import '../models/trip.dart';
+import '../services/reminder_scheduler.dart';
+import '../theme/app_theme.dart';
 import '../utils/date_format.dart';
+import '../utils/trip_status.dart';
+import '../widgets/ui.dart';
 import 'trip_detail_screen.dart';
 import 'trip_edit_screen.dart';
 
@@ -59,32 +63,24 @@ class _TripListScreenState extends State<TripListScreen> {
         builder: (_) => TripDetailScreen(trip: trip, db: widget.db),
       ),
     );
-    // Trip name/dates may have changed inside the detail screen.
     setState(_reload);
   }
 
   Future<void> _confirmDelete(Trip trip) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete trip?'),
-        content: Text(
+    final confirmed = await confirmDestructive(
+      context,
+      title: 'Delete trip?',
+      message:
           'This permanently removes "${trip.name}" and all its stays, '
           'transport, items, and documents.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.tonal(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
-    if (confirmed != true) return;
+    if (!confirmed) return;
+    // Deleting the trip cascades its stays away, so cancel their reminders
+    // while the ids can still be read.
+    final stays = await _db.getStaysForTrip(trip.id!);
+    await Reminders.instance.cancelStays(
+      stays.map((s) => s.id).whereType<int>(),
+    );
     await _db.deleteTrip(trip.id!);
     if (mounted) setState(_reload);
   }
@@ -92,43 +88,178 @@ class _TripListScreenState extends State<TripListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('My Trips')),
+      backgroundColor: AppColors.canvas,
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _createTrip,
-        icon: const Icon(Icons.add),
-        label: const Text('New Trip'),
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('Plan a trip'),
       ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: FutureBuilder<List<Trip>>(
-          future: _tripsFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return _ErrorState(message: '${snapshot.error}');
-            }
-            final trips = snapshot.data ?? const [];
-            if (trips.isEmpty) {
-              return const _EmptyState();
-            }
-            return ListView.separated(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-              itemCount: trips.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final trip = trips[index];
-                return _TripCard(
-                  trip: trip,
-                  onTap: () => _openTrip(trip),
-                  onEdit: () => _editTrip(trip),
-                  onDelete: () => _confirmDelete(trip),
-                );
-              },
-            );
-          },
+      body: AppBackground(
+        child: SafeArea(
+          child: FutureBuilder<List<Trip>>(
+            future: _tripsFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final trips = snapshot.data ?? const <Trip>[];
+
+              return RefreshIndicator(
+                onRefresh: _refresh,
+                color: AppColors.primary,
+                backgroundColor: AppColors.surfaceAlt,
+                child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverToBoxAdapter(child: _Greeting(trips: trips)),
+                    if (snapshot.hasError)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: AppErrorState(message: '${snapshot.error}'),
+                      )
+                    else if (trips.isEmpty)
+                      const SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: AppEmptyState(
+                          icon: Icons.luggage_outlined,
+                          title: 'No trips yet',
+                          message:
+                              'Plan your first trip and keep every booking, '
+                              'route, and packing list in one place.',
+                        ),
+                      )
+                    else ...[
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.gutter,
+                          AppSpacing.xl,
+                          AppSpacing.gutter,
+                          AppSpacing.md,
+                        ),
+                        sliver: const SliverToBoxAdapter(
+                          child: SectionLabel(label: 'Your itineraries'),
+                        ),
+                      ),
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.gutter,
+                          0,
+                          AppSpacing.gutter,
+                          110,
+                        ),
+                        sliver: SliverList.separated(
+                          itemCount: trips.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: AppSpacing.md),
+                          itemBuilder: (context, index) {
+                            final trip = trips[index];
+                            return _TripCard(
+                              trip: trip,
+                              accent: accentFor(trip.id ?? index),
+                              onTap: () => _openTrip(trip),
+                              onEdit: () => _editTrip(trip),
+                              onDelete: () => _confirmDelete(trip),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// Page header: brand mark, headline, and a one-line read on what's coming up.
+class _Greeting extends StatelessWidget {
+  final List<Trip> trips;
+
+  const _Greeting({required this.trips});
+
+  /// The soonest trip that hasn't finished yet, if any.
+  Trip? get _next {
+    final now = DateTime.now();
+    final live =
+        trips.where((t) => daysBetween(now, t.endDate) >= 0).toList()
+          ..sort((a, b) => a.startDate.compareTo(b.startDate));
+    return live.isEmpty ? null : live.first;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final next = _next;
+    final status = next == null
+        ? null
+        : tripStatus(next.startDate, next.endDate);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.gutter,
+        AppSpacing.lg,
+        AppSpacing.gutter,
+        0,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const AppLogo(),
+              const SizedBox(width: AppSpacing.md),
+              Text(
+                'Packmate',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const Spacer(),
+              AppPill(
+                label: trips.isEmpty
+                    ? 'Empty'
+                    : '${trips.length} trip${trips.length == 1 ? '' : 's'}',
+                icon: Icons.map_outlined,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xxl),
+          Text('Your trips', style: theme.textTheme.displaySmall),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Icon(
+                next == null
+                    ? Icons.nightlight_round
+                    : Icons.flight_takeoff_rounded,
+                size: 16,
+                color: status?.color ?? AppColors.textFaint,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  next == null
+                      ? 'Nothing on the horizon — time to plan something.'
+                      : status!.phase == TripPhase.ongoing
+                      ? 'Trip in progress · ${status.label}'
+                      : 'Next departure ${status.label.toLowerCase()}',
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: next == null
+                        ? AppColors.textMuted
+                        : AppColors.text,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -136,12 +267,14 @@ class _TripListScreenState extends State<TripListScreen> {
 
 class _TripCard extends StatelessWidget {
   final Trip trip;
+  final Color accent;
   final VoidCallback onTap;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _TripCard({
     required this.trip,
+    required this.accent,
     required this.onTap,
     required this.onEdit,
     required this.onDelete,
@@ -149,80 +282,123 @@ class _TripCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        contentPadding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-        leading: CircleAvatar(
-          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-          child: Icon(
-            Icons.luggage,
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
-          ),
-        ),
-        title: Text(
-          trip.name,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(formatDateRange(trip.startDate, trip.endDate)),
-        trailing: PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'edit') onEdit();
-            if (value == 'delete') onDelete();
-          },
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: 'edit', child: Text('Edit')),
-            PopupMenuItem(value: 'delete', child: Text('Delete')),
-          ],
-        ),
+    final theme = Theme.of(context);
+    final status = tripStatus(trip.startDate, trip.endDate);
+    final nights = tripLengthInDays(trip.startDate, trip.endDate) - 1;
+    final dimmed = status.phase == TripPhase.past;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         onTap: onTap,
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState();
-
-  @override
-  Widget build(BuildContext context) {
-    // ListView so RefreshIndicator still works when there are no trips.
-    return ListView(
-      children: [
-        const SizedBox(height: 120),
-        Icon(Icons.luggage_outlined,
-            size: 72, color: Theme.of(context).colorScheme.outline),
-        const SizedBox(height: 16),
-        Center(
-          child: Text(
-            'No trips yet',
-            style: Theme.of(context).textTheme.titleMedium,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(color: AppColors.border),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color.alphaBlend(
+                  accent.withValues(alpha: dimmed ? 0.04 : 0.10),
+                  AppColors.surface,
+                ),
+                AppColors.surface,
+              ],
+            ),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.sm,
+                  AppSpacing.md,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AppIconTile(
+                      icon: Icons.location_on_rounded,
+                      color: dimmed ? AppColors.textFaint : accent,
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            trip.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleLarge?.copyWith(
+                              color: dimmed
+                                  ? AppColors.textMuted
+                                  : AppColors.text,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            formatDateRange(trip.startDate, trip.endDate),
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
+                    ),
+                    AppRowMenu(onEdit: onEdit, onDelete: onDelete),
+                  ],
+                ),
+              ),
+              const Divider(indent: AppSpacing.lg, endIndent: AppSpacing.lg),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: AppPill(
+                              label: status.label,
+                              color: status.color,
+                              icon: status.phase == TripPhase.ongoing
+                                  ? Icons.play_arrow_rounded
+                                  : Icons.schedule_rounded,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Flexible(
+                            child: AppPill(
+                              label: nights == 0
+                                  ? 'Day trip'
+                                  : '$nights night${nights == 1 ? '' : 's'}',
+                              color: AppColors.textMuted,
+                              icon: Icons.bedtime_outlined,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 18,
+                      color: dimmed ? AppColors.textFaint : accent,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 8),
-        const Center(
-          child: Text('Tap “New Trip” to plan your first one.'),
-        ),
-      ],
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  final String message;
-  const _ErrorState({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        const SizedBox(height: 120),
-        Icon(Icons.error_outline,
-            size: 64, color: Theme.of(context).colorScheme.error),
-        const SizedBox(height: 16),
-        Center(child: Text('Something went wrong.\n$message',
-            textAlign: TextAlign.center)),
-      ],
+      ),
     );
   }
 }

@@ -14,7 +14,7 @@ import '../models/document.dart';
 /// [DatabaseHelper.forTesting] with an in-memory path.
 class DatabaseHelper {
   static const _dbName = 'trip_inventory.db';
-  static const _dbVersion = 1;
+  static const _dbVersion = 2;
 
   static const tableTrip = 'trips';
   static const tableStay = 'stays';
@@ -48,7 +48,22 @@ class DatabaseHelper {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createSchema,
+      onUpgrade: _upgradeSchema,
     );
+  }
+
+  /// v1 scoped items to an optional stay. Items are now always trip-wide, so
+  /// rebuild the table without `stayId`, keeping every existing item.
+  Future<void> _upgradeSchema(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE $tableItem RENAME TO ${tableItem}_old');
+      await _createItemTable(db);
+      await db.execute('''
+        INSERT INTO $tableItem (id, tripId, name, packed)
+        SELECT id, tripId, name, packed FROM ${tableItem}_old
+      ''');
+      await db.execute('DROP TABLE ${tableItem}_old');
+    }
   }
 
   Future<void> _createSchema(Database db, int version) async {
@@ -84,17 +99,7 @@ class DatabaseHelper {
       )
     ''');
 
-    await db.execute('''
-      CREATE TABLE $tableItem (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tripId INTEGER NOT NULL,
-        stayId INTEGER,
-        name TEXT NOT NULL,
-        packed INTEGER NOT NULL DEFAULT 0,
-        FOREIGN KEY (tripId) REFERENCES $tableTrip (id) ON DELETE CASCADE,
-        FOREIGN KEY (stayId) REFERENCES $tableStay (id) ON DELETE CASCADE
-      )
-    ''');
+    await _createItemTable(db);
 
     await db.execute('''
       CREATE TABLE $tableDocument (
@@ -102,6 +107,20 @@ class DatabaseHelper {
         tripId INTEGER NOT NULL,
         photoPath TEXT NOT NULL,
         label TEXT NOT NULL,
+        FOREIGN KEY (tripId) REFERENCES $tableTrip (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  /// Items are trip-scoped only — no stay column, so nothing to cascade when a
+  /// stay is deleted.
+  Future<void> _createItemTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE $tableItem (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tripId INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        packed INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (tripId) REFERENCES $tableTrip (id) ON DELETE CASCADE
       )
     ''');
@@ -236,29 +255,8 @@ class DatabaseHelper {
     return maps.map(Item.fromMap).toList();
   }
 
-  /// Items scoped to a specific stay only (excludes whole-trip items).
-  Future<List<Item>> getItemsForStay(int stayId) async {
-    final db = await database;
-    final maps = await db.query(tableItem,
-        where: 'stayId = ?', whereArgs: [stayId], orderBy: 'id ASC');
-    return maps.map(Item.fromMap).toList();
-  }
-
-  /// Unpacked items relevant to a notification for a stay: whole-trip items
-  /// (stayId IS NULL) plus items tied to this stay. Used to build reminder text.
-  Future<List<Item>> getUnpackedItemsForStay(int tripId, int stayId) async {
-    final db = await database;
-    final maps = await db.query(
-      tableItem,
-      where: 'tripId = ? AND packed = 0 AND (stayId IS NULL OR stayId = ?)',
-      whereArgs: [tripId, stayId],
-      orderBy: 'id ASC',
-    );
-    return maps.map(Item.fromMap).toList();
-  }
-
-  /// Unpacked items for a whole-trip reminder (e.g. a transport leg): every
-  /// unpacked item on the trip regardless of stay assignment.
+  /// Every unpacked item on the trip. Since items are never hotel-specific,
+  /// this is also the list behind a checkout reminder for any single stay.
   Future<List<Item>> getUnpackedItemsForTrip(int tripId) async {
     final db = await database;
     final maps = await db.query(

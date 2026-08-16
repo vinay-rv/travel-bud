@@ -1,12 +1,15 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' show join;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import 'package:trip_inventory_tracker/data/database_helper.dart';
-import 'package:trip_inventory_tracker/models/trip.dart';
-import 'package:trip_inventory_tracker/models/stay.dart';
-import 'package:trip_inventory_tracker/models/transport_leg.dart';
-import 'package:trip_inventory_tracker/models/item.dart';
-import 'package:trip_inventory_tracker/models/document.dart';
+import 'package:packmate/data/database_helper.dart';
+import 'package:packmate/models/trip.dart';
+import 'package:packmate/models/stay.dart';
+import 'package:packmate/models/transport_leg.dart';
+import 'package:packmate/models/item.dart';
+import 'package:packmate/models/document.dart';
 
 void main() {
   // Run sqflite against the FFI implementation so tests work on the host.
@@ -103,14 +106,12 @@ void main() {
   });
 
   group('Item CRUD and scoping', () {
-    test('defaults to whole-trip (stayId null) and toggles packed', () async {
+    test('starts unpacked and toggles packed', () async {
       final trip = await seedTrip();
       final item = await db.createItem(Item(
         tripId: trip.id!,
         name: 'Passport',
       ));
-      expect(item.stayId, isNull);
-      expect(item.isWholeTrip, isTrue);
       expect(item.packed, isFalse);
 
       await db.setItemPacked(item.id!, true);
@@ -118,53 +119,31 @@ void main() {
       expect(items.single.packed, isTrue);
     });
 
-    test('getUnpackedItemsForStay returns whole-trip + this-stay unpacked',
-        () async {
+    test('getUnpackedItemsForTrip excludes packed items', () async {
       final trip = await seedTrip();
-      final stayA = await db.createStay(Stay(
-        tripId: trip.id!,
-        hotelName: 'A',
-        checkInAt: DateTime(2026, 3, 1),
-        checkOutAt: DateTime(2026, 3, 4),
-      ));
-      final stayB = await db.createStay(Stay(
-        tripId: trip.id!,
-        hotelName: 'B',
-        checkInAt: DateTime(2026, 3, 4),
-        checkOutAt: DateTime(2026, 3, 6),
-      ));
-
-      // Whole-trip unpacked.
       await db.createItem(Item(tripId: trip.id!, name: 'Charger'));
-      // Stay A unpacked -> should appear for A, not B.
-      await db.createItem(
-          Item(tripId: trip.id!, stayId: stayA.id, name: 'Room key deposit'));
-      // Stay B unpacked -> should not appear for A.
-      await db.createItem(
-          Item(tripId: trip.id!, stayId: stayB.id, name: 'Spa slippers'));
-      // Whole-trip but already packed -> excluded.
+      await db.createItem(Item(tripId: trip.id!, name: 'Room key deposit'));
       final packed =
           await db.createItem(Item(tripId: trip.id!, name: 'Sunglasses'));
       await db.setItemPacked(packed.id!, true);
 
-      final unpackedA = await db.getUnpackedItemsForStay(trip.id!, stayA.id!);
-      final names = unpackedA.map((i) => i.name).toList();
+      final unpacked = await db.getUnpackedItemsForTrip(trip.id!);
+      final names = unpacked.map((i) => i.name).toList();
       expect(names, containsAll(['Charger', 'Room key deposit']));
-      expect(names, isNot(contains('Spa slippers')));
       expect(names, isNot(contains('Sunglasses')));
     });
 
-    test('getUnpackedItemsForTrip returns every unpacked item', () async {
+    test('items are not tied to a stay, so every stay sees the full list',
+        () async {
       final trip = await seedTrip();
-      final stay = await db.createStay(Stay(
+      await db.createStay(Stay(
         tripId: trip.id!,
         hotelName: 'A',
         checkInAt: DateTime(2026, 3, 1),
         checkOutAt: DateTime(2026, 3, 4),
       ));
       await db.createItem(Item(tripId: trip.id!, name: 'Charger'));
-      await db.createItem(
-          Item(tripId: trip.id!, stayId: stay.id, name: 'Room key'));
+      await db.createItem(Item(tripId: trip.id!, name: 'Room key'));
 
       final unpacked = await db.getUnpackedItemsForTrip(trip.id!);
       expect(unpacked.length, 2);
@@ -185,11 +164,90 @@ void main() {
     });
   });
 
+  group('Schema migration', () {
+    test('v1 items survive the upgrade that drops stayId', () async {
+      final dir = await Directory.systemTemp.createTemp('trip_db_migration');
+      final path = join(dir.path, 'v1.db');
+      addTearDown(() => dir.delete(recursive: true));
+
+      // Build a v1 database by hand: items still carry a stayId.
+      final legacy = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(version: 1),
+      );
+      await legacy.execute('''
+        CREATE TABLE trips (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          startDate INTEGER NOT NULL,
+          endDate INTEGER NOT NULL
+        )
+      ''');
+      await legacy.execute('''
+        CREATE TABLE stays (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tripId INTEGER NOT NULL,
+          hotelName TEXT NOT NULL,
+          checkInAt INTEGER NOT NULL,
+          checkOutAt INTEGER NOT NULL,
+          FOREIGN KEY (tripId) REFERENCES trips (id) ON DELETE CASCADE
+        )
+      ''');
+      await legacy.execute('''
+        CREATE TABLE items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tripId INTEGER NOT NULL,
+          stayId INTEGER,
+          name TEXT NOT NULL,
+          packed INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (tripId) REFERENCES trips (id) ON DELETE CASCADE,
+          FOREIGN KEY (stayId) REFERENCES stays (id) ON DELETE CASCADE
+        )
+      ''');
+      final tripId = await legacy.insert('trips', {
+        'name': 'Northeast India',
+        'startDate': DateTime(2026, 3, 1).millisecondsSinceEpoch,
+        'endDate': DateTime(2026, 3, 8).millisecondsSinceEpoch,
+      });
+      final stayId = await legacy.insert('stays', {
+        'tripId': tripId,
+        'hotelName': 'Hotel Polo Towers',
+        'checkInAt': DateTime(2026, 3, 1, 14).millisecondsSinceEpoch,
+        'checkOutAt': DateTime(2026, 3, 4, 11).millisecondsSinceEpoch,
+      });
+      await legacy.insert('items', {
+        'tripId': tripId,
+        'stayId': null,
+        'name': 'Passport',
+        'packed': 0,
+      });
+      await legacy.insert('items', {
+        'tripId': tripId,
+        'stayId': stayId,
+        'name': 'Room key deposit',
+        'packed': 1,
+      });
+      await legacy.close();
+
+      // Reopening through the helper runs the v2 upgrade.
+      final upgraded = DatabaseHelper.forTesting(path);
+      addTearDown(upgraded.close);
+
+      final items = await upgraded.getItemsForTrip(tripId);
+      expect(items.map((i) => i.name), ['Passport', 'Room key deposit']);
+      // The formerly stay-scoped item is now a plain trip item, still packed.
+      expect(items.last.packed, isTrue);
+      // Deleting the stay no longer takes any item with it.
+      await upgraded.deleteStay(stayId);
+      expect((await upgraded.getItemsForTrip(tripId)).length, 2);
+    });
+  });
+
   group('Cascade delete', () {
     test('deleting a trip removes its stays, legs, items, documents',
         () async {
       final trip = await seedTrip();
-      final stay = await db.createStay(Stay(
+      await db.createStay(Stay(
         tripId: trip.id!,
         hotelName: 'A',
         checkInAt: DateTime(2026, 3, 1),
@@ -203,8 +261,7 @@ void main() {
         toLocation: 'DEL',
       ));
       await db.createItem(Item(tripId: trip.id!, name: 'Passport'));
-      await db.createItem(
-          Item(tripId: trip.id!, stayId: stay.id, name: 'Room key'));
+      await db.createItem(Item(tripId: trip.id!, name: 'Room key'));
       await db.createDocument(Document(
         tripId: trip.id!,
         photoPath: '/p.jpg',
@@ -219,8 +276,7 @@ void main() {
       expect(await db.getDocumentsForTrip(trip.id!), isEmpty);
     });
 
-    test('deleting a stay removes its items but keeps whole-trip items',
-        () async {
+    test('deleting a stay leaves the packing list untouched', () async {
       final trip = await seedTrip();
       final stay = await db.createStay(Stay(
         tripId: trip.id!,
@@ -229,14 +285,12 @@ void main() {
         checkOutAt: DateTime(2026, 3, 4),
       ));
       await db.createItem(Item(tripId: trip.id!, name: 'Passport'));
-      await db.createItem(
-          Item(tripId: trip.id!, stayId: stay.id, name: 'Room key'));
+      await db.createItem(Item(tripId: trip.id!, name: 'Room key'));
 
       await db.deleteStay(stay.id!);
 
       final items = await db.getItemsForTrip(trip.id!);
-      expect(items.length, 1);
-      expect(items.single.name, 'Passport');
+      expect(items.map((i) => i.name), containsAll(['Passport', 'Room key']));
     });
   });
 }
