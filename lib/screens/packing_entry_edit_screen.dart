@@ -1,41 +1,35 @@
 import 'package:flutter/material.dart';
 
 import '../data/database_helper.dart';
-import '../models/item.dart';
 import '../models/item_category.dart';
+import '../models/packing_list.dart';
 import '../theme/category_style.dart';
 import '../widgets/item_fields.dart';
 import '../widgets/ui.dart';
 
-/// Create a new item for [tripId] (when [existing] is null) or edit one.
-/// Items always cover the whole trip; what varies is the category it files
-/// under and how many to bring.
-/// Pops with the saved [Item] on success, or null if cancelled.
-class ItemEditScreen extends StatefulWidget {
-  final int tripId;
-  final Item? existing;
-
-  /// Preselects a category — used when adding from within a category.
-  final ItemCategory? initialCategory;
+/// Add an entry to a saved list (when [existing] is null) or edit one.
+/// Pops with the saved [PackingListEntry] on success, or null if cancelled.
+class PackingEntryEditScreen extends StatefulWidget {
+  final int listId;
+  final PackingListEntry? existing;
 
   /// Injectable for tests; defaults to the app-wide singleton.
   final DatabaseHelper? db;
 
-  const ItemEditScreen({
+  const PackingEntryEditScreen({
     super.key,
-    required this.tripId,
+    required this.listId,
     this.existing,
-    this.initialCategory,
     this.db,
   });
 
   bool get isEditing => existing != null;
 
   @override
-  State<ItemEditScreen> createState() => _ItemEditScreenState();
+  State<PackingEntryEditScreen> createState() => _PackingEntryEditScreenState();
 }
 
-class _ItemEditScreenState extends State<ItemEditScreen> {
+class _PackingEntryEditScreenState extends State<PackingEntryEditScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late ItemCategory _category;
@@ -48,9 +42,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.existing?.name ?? '');
-    _category = widget.existing?.category ??
-        widget.initialCategory ??
-        ItemCategory.other;
+    _category = widget.existing?.category ?? ItemCategory.other;
     _quantity = widget.existing?.quantity ?? 1;
   }
 
@@ -64,22 +56,21 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
 
-    final item = Item(
+    final entry = PackingListEntry(
       id: widget.existing?.id,
-      tripId: widget.tripId,
+      listId: widget.listId,
       name: _nameController.text.trim(),
       category: _category,
       quantity: _quantity,
-      packed: widget.existing?.packed ?? false,
     );
 
     try {
-      final Item saved;
+      final PackingListEntry saved;
       if (widget.isEditing) {
-        await _db.updateItem(item);
-        saved = item;
+        await _db.updatePackingListEntry(entry);
+        saved = entry;
       } else {
-        saved = await _db.createItem(item);
+        saved = await _db.addPackingListEntry(entry);
       }
       if (mounted) Navigator.of(context).pop(saved);
     } catch (e) {
@@ -97,7 +88,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       formKey: _formKey,
       accent: _category.color,
       title: widget.isEditing ? 'Edit item' : 'Add item',
-      subtitle: 'Something to pack for this trip',
+      subtitle: 'Part of this saved list',
       icon: _category.icon,
       actionLabel: widget.isEditing ? 'Save changes' : 'Add item',
       saving: _saving,
@@ -113,8 +104,8 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           onSubmitted: _save,
         ),
         const FormHint(
-          'Every item travels with you for the whole trip, so it counts at '
-          'each hotel — a checkout reminder always covers the full list.',
+          'Saved list items are a template. Adding one here changes future '
+          'trips you build from this list, not trips you already made.',
         ),
       ],
     );

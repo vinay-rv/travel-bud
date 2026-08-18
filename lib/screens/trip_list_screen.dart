@@ -7,6 +7,8 @@ import '../theme/app_theme.dart';
 import '../utils/date_format.dart';
 import '../utils/trip_status.dart';
 import '../widgets/ui.dart';
+import 'account_screen.dart';
+import 'saved_lists_screen.dart';
 import 'trip_detail_screen.dart';
 import 'trip_edit_screen.dart';
 
@@ -66,6 +68,18 @@ class _TripListScreenState extends State<TripListScreen> {
     setState(_reload);
   }
 
+  Future<void> _openSavedLists() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => SavedListsScreen(db: widget.db)),
+    );
+  }
+
+  Future<void> _openBackup() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AccountScreen()),
+    );
+  }
+
   Future<void> _confirmDelete(Trip trip) async {
     final confirmed = await confirmDestructive(
       context,
@@ -113,7 +127,13 @@ class _TripListScreenState extends State<TripListScreen> {
                 child: CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
-                    SliverToBoxAdapter(child: _Greeting(trips: trips)),
+                    SliverToBoxAdapter(
+                      child: _Greeting(
+                        trips: trips,
+                        onOpenSavedLists: _openSavedLists,
+                        onOpenBackup: _openBackup,
+                      ),
+                    ),
                     if (snapshot.hasError)
                       SliverFillRemaining(
                         hasScrollBody: false,
@@ -180,8 +200,14 @@ class _TripListScreenState extends State<TripListScreen> {
 /// Page header: brand mark, headline, and a one-line read on what's coming up.
 class _Greeting extends StatelessWidget {
   final List<Trip> trips;
+  final VoidCallback onOpenSavedLists;
+  final VoidCallback onOpenBackup;
 
-  const _Greeting({required this.trips});
+  const _Greeting({
+    required this.trips,
+    required this.onOpenSavedLists,
+    required this.onOpenBackup,
+  });
 
   /// The soonest trip that hasn't finished yet, if any.
   Trip? get _next {
@@ -226,6 +252,18 @@ class _Greeting extends StatelessWidget {
                     ? 'Empty'
                     : '${trips.length} trip${trips.length == 1 ? '' : 's'}',
                 icon: Icons.map_outlined,
+              ),
+              IconButton(
+                icon: const Icon(Icons.bookmarks_outlined),
+                color: AppColors.textMuted,
+                tooltip: 'Saved lists',
+                onPressed: onOpenSavedLists,
+              ),
+              IconButton(
+                icon: const Icon(Icons.cloud_outlined),
+                color: AppColors.textMuted,
+                tooltip: 'Backup',
+                onPressed: onOpenBackup,
               ),
             ],
           ),

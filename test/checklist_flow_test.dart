@@ -52,7 +52,15 @@ void main() {
   });
 
   // Opens the trip detail and switches to the Items tab.
+  //
+  // Uses a phone-sized viewport rather than the 800x600 default: the list is
+  // tall enough that on a short window the extended FAB sits on top of the
+  // last row's controls, which no real device does.
   Future<void> openItemsTab(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1080, 2200);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
+
     await tester.pumpWidget(
       MaterialApp(home: TripDetailScreen(trip: trip, db: db)),
     );

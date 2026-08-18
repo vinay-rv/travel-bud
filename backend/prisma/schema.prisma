@@ -1,0 +1,238 @@
+// Packmate API data model.
+//
+// This mirrors the app's local SQLite schema, with one difference that matters
+// more than any other: every syncable row carries a `userId`, and there is no
+// row level security to fall back on. With Supabase, forgetting a filter meant
+// the database refused the query. Here, forgetting a filter means one user
+// reads another's trips. Every query in this service must be scoped by userId,
+// and the tests exist mainly to prove that.
+//
+// Identity: `uuid` is the client-generated id and the sync key. The app's local
+// integer primary keys never leave the device.
+//
+// Timestamps are epoch milliseconds (BigInt) to match the Dart models exactly,
+// avoiding a timezone conversion on the wire. `updatedAt` is assigned by the
+// server on every write and is the cursor space the client pages through, so a
+// device with a wrong clock cannot poison it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique
+  // Null for accounts that only ever signed in with Google or Apple.
+  passwordHash  String?
+  emailVerified Boolean  @default(false)
+  displayName   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  identities         Identity[]
+  refreshTokens      RefreshToken[]
+  verificationTokens VerificationToken[]
+  trips              Trip[]
+  stays              Stay[]
+  transportLegs      TransportLeg[]
+  items              Item[]
+  packingLists       PackingList[]
+  packingListItems   PackingListItem[]
+  documents          Document[]
+
+  @@map("users")
+}
+
+/// A federated login attached to a user, so signing in with Google and later
+/// with the same email by password lands on one account rather than two.
+model Identity {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  provider  String // 'google' | 'apple'
+  subject   String // the provider's stable user id ("sub")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  @@index([userId])
+  @@map("identities")
+}
+
+/// Opaque refresh tokens, stored only as a hash.
+///
+/// A leaked database therefore cannot be used to mint sessions. Tokens rotate
+/// on every use: `replacedById` leaves an audit trail, and a token presented
+/// after it was already rotated is treated as theft and revokes the family.
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+  replacedById String?   @db.Uuid
+  userAgent    String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Trip {
+  uuid      String  @id @db.Uuid
+  userId    String  @db.Uuid
+  name      String
+  startDate BigInt
+  endDate   BigInt
+  updatedAt BigInt  @default(0)
+  deletedAt BigInt?
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stays         Stay[]
+  transportLegs TransportLeg[]
+  items         Item[]
+  documents     Document[]
+
+  @@index([userId, updatedAt])
+  @@map("trips")
+}
+
+model Stay {
+  uuid       String  @id @db.Uuid
+  userId     String  @db.Uuid
+  tripUuid   String  @db.Uuid
+  hotelName  String
+  checkInAt  BigInt
+  checkOutAt BigInt
+  updatedAt  BigInt  @default(0)
+  deletedAt  BigInt?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip @relation(fields: [tripUuid], references: [uuid], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@index([tripUuid])
+  @@map("stays")
+}
+
+model TransportLeg {
+  uuid         String  @id @db.Uuid
+  userId       String  @db.Uuid
+  tripUuid     String  @db.Uuid
+  type         String
+  departureAt  BigInt
+  fromLocation String
+  toLocation   String
+  updatedAt    BigInt  @default(0)
+  deletedAt    BigInt?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip @relation(fields: [tripUuid], references: [uuid], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@index([tripUuid])
+  @@map("transport_legs")
+}
+
+model Item {
+  uuid      String  @id @db.Uuid
+  userId    String  @db.Uuid
+  tripUuid  String  @db.Uuid
+  name      String
+  // Free text, not an enum: the app falls back to "other" for anything it does
+  // not recognise, so a newer app's category must not be rejected outright.
+  category  String  @default("other")
+  quantity  Int     @default(1)
+  packed    Boolean @default(false)
+  updatedAt BigInt  @default(0)
+  deletedAt BigInt?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip @relation(fields: [tripUuid], references: [uuid], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@index([tripUuid])
+  @@map("items")
+}
+
+model PackingList {
+  uuid      String  @id @db.Uuid
+  userId    String  @db.Uuid
+  name      String
+  createdAt BigInt
+  updatedAt BigInt  @default(0)
+  deletedAt BigInt?
+
+  user  User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items PackingListItem[]
+
+  @@index([userId, updatedAt])
+  @@map("packing_lists")
+}
+
+model PackingListItem {
+  uuid      String  @id @db.Uuid
+  userId    String  @db.Uuid
+  listUuid  String  @db.Uuid
+  name      String
+  category  String  @default("other")
+  quantity  Int     @default(1)
+  updatedAt BigInt  @default(0)
+  deletedAt BigInt?
+
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  list PackingList @relation(fields: [listUuid], references: [uuid], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@index([listUuid])
+  @@map("packing_list_items")
+}
+
+/// Present so the schema is complete, but not synced yet: the app's `photoPath`
+/// is a device file path, which is meaningless on another phone. `storageKey`
+/// is what it becomes once file storage exists.
+model Document {
+  uuid       String  @id @db.Uuid
+  userId     String  @db.Uuid
+  tripUuid   String  @db.Uuid
+  storageKey String?
+  label      String
+  updatedAt  BigInt  @default(0)
+  deletedAt  BigInt?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip @relation(fields: [tripUuid], references: [uuid], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@index([tripUuid])
+  @@map("documents")
+}
+
+/// One-time codes for proving an email address, and for resetting a password.
+///
+/// Stored as a hash for the same reason refresh tokens are: a leaked database
+/// must not hand anyone a working reset link. `consumedAt` makes a code
+/// single-use, so an old email cannot be replayed after the fact.
+model VerificationToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  /// 'verify_email' | 'reset_password'
+  purpose    String
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@index([codeHash])
+  @@map("verification_tokens")
+}
