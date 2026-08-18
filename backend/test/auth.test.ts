@@ -34,11 +34,61 @@ describe('Signing up', () => {
   it('normalises the email so case and spacing do not create two accounts',
     async () => {
       await post('/auth/signup', { email: '  Traveller@Example.COM ', password: PASSWORD });
-      const second = await post('/auth/signup', { email: EMAIL, password: PASSWORD });
+      await post('/auth/signup', { email: EMAIL, password: PASSWORD });
 
-      expect(second.statusCode).toBe(409);
+      // The second call resends rather than colliding, because the address is
+      // still unconfirmed — but it is recognised as the same address.
       expect(await prisma.user.count()).toBe(1);
+      expect(await prisma.user.findUnique({ where: { email: EMAIL } })).not.toBeNull();
     });
+
+  it('signing up again with an unconfirmed address resends rather than '
+    + 'colliding', async () => {
+    await post('/auth/signup', { email: EMAIL, password: PASSWORD });
+    const firstCode = codeFor(EMAIL);
+
+    // The obvious thing to do when a code never arrives. It must not dead-end
+    // with "already registered", which would leave the account unusable.
+    const again = await post('/auth/signup', { email: EMAIL, password: PASSWORD });
+    expect(again.statusCode).toBe(201);
+    expect(again.json()).toMatchObject({ status: 'verification_required' });
+
+    const secondCode = codeFor(EMAIL);
+    expect(secondCode).not.toBe(firstCode);
+    expect(await prisma.user.count()).toBe(1);
+
+    // And the newest code is the one that works.
+    expect((await post('/auth/verify-email', { email: EMAIL, code: secondCode }))
+      .statusCode).toBe(200);
+  });
+
+  it('still refuses a second account once the address is confirmed', async () => {
+    await createVerifiedUser(EMAIL, PASSWORD);
+
+    const again = await post('/auth/signup', { email: EMAIL, password: PASSWORD });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe('email_taken');
+  });
+
+  it('reports a failed verification email instead of a bare 500', async () => {
+    // A mailer that cannot send — an invalid API key, a provider outage.
+    const broken = {
+      send: async () => { throw new Error('Email send failed (401)'); },
+    };
+    const { buildApp } = await import('../src/app.js');
+    const brokenApp = await buildApp({ mailer: broken });
+
+    const response = await brokenApp.inject({
+      method: 'POST',
+      url: '/auth/signup',
+      payload: { email: 'unlucky@example.com', password: PASSWORD },
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error).toBe('email_send_failed');
+    // Recoverable: the account exists unconfirmed, so signing up again resends.
+    expect(await prisma.user.count()).toBe(1);
+  });
 
   it('rejects a password short enough to guess', async () => {
     const response = await post('/auth/signup', { email: EMAIL, password: 'short' });

@@ -1,33 +1,37 @@
 import 'package:flutter/material.dart';
 
-import '../sync/sync_config.dart';
+import '../auth/auth_service.dart';
+import '../auth/session.dart';
 import '../sync/sync_engine.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_format.dart';
 import '../widgets/ui.dart';
+import 'auth/auth_gate.dart';
 
-/// Backup and account settings — the entire visible surface of sync.
+/// Who you are signed in as, and how the syncing is going.
 ///
-/// The copy here is deliberately careful. An anonymous account is a convenience,
-/// not a safety net: it cannot be recovered after a reinstall or on a new phone
-/// until an email is attached. Telling someone their trips are "backed up" when
-/// that is the only thing standing between them and losing everything would be
-/// the kind of reassurance that costs people their data.
+/// Sync itself has no controls: it is not a feature the user turns on, it is
+/// how an account works. All that is left to show is whether it is up to date,
+/// a way to force it, and the way out.
 class AccountScreen extends StatefulWidget {
-  /// Injectable for tests; defaults to the app-wide engine.
+  /// Injectable for tests; default to the app-wide instances.
+  final AuthService? auth;
   final SyncEngine? engine;
 
-  const AccountScreen({super.key, this.engine});
+  /// Sends the app back to sign-in once the session ends.
+  final VoidCallback? onSignedOut;
+
+  const AccountScreen({super.key, this.auth, this.engine, this.onSignedOut});
 
   @override
   State<AccountScreen> createState() => _AccountScreenState();
 }
 
 class _AccountScreenState extends State<AccountScreen> {
+  AuthService get _auth => widget.auth ?? Auth.instance;
   SyncEngine get _engine => widget.engine ?? Sync.instance;
 
   bool _busy = false;
-  String? _accountId;
   DateTime? _lastSyncedAt;
   String? _message;
 
@@ -38,22 +42,17 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   Future<void> _refresh() async {
-    final accountId = await _engine.claimedUserId();
     final lastSyncedAt = await _engine.lastSyncedAt();
     if (!mounted) return;
-    setState(() {
-      _accountId = accountId;
-      _lastSyncedAt = lastSyncedAt;
-    });
+    setState(() => _lastSyncedAt = lastSyncedAt);
   }
 
-  /// Runs [action], keeping the screen busy, then reports what happened.
-  Future<void> _run(Future<SyncOutcome> Function() action) async {
+  Future<void> _syncNow() async {
     setState(() {
       _busy = true;
       _message = null;
     });
-    final outcome = await action();
+    final outcome = await _engine.sync();
     if (!mounted) return;
     await _refresh();
     if (!mounted) return;
@@ -61,30 +60,28 @@ class _AccountScreenState extends State<AccountScreen> {
     setState(() {
       _busy = false;
       _message = switch (outcome) {
-        SyncOutcome.ok => null,
-        SyncOutcome.noAccount => null,
-        SyncOutcome.busy => null,
         SyncOutcome.unavailable =>
-          'No connection. Your trips are safe on this phone — this will '
-              'finish on its own once you are back online.',
-        SyncOutcome.accountMismatch => null,
+          'No connection. Your trips are safe on this phone and will sync '
+              'once you are back online.',
+        SyncOutcome.noAccount => 'Signed out. Sign in again to sync.',
+        _ => null,
       };
     });
 
     if (outcome == SyncOutcome.accountMismatch) await _askAboutMismatch();
   }
 
-  /// The device's data belongs to one account and a different one is signed in.
-  /// Merging automatically would either duplicate everything or quietly throw
-  /// something away, so this asks instead.
+  /// This phone's trips belong to one account and a different one has signed
+  /// in. Merging automatically would either duplicate everything or throw
+  /// something away, so it asks.
   Future<void> _askAboutMismatch() async {
     final resolution = await showDialog<MismatchResolution>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Two sets of trips'),
         content: const Text(
-          'This phone has trips that belong to a different account than the '
-          'one signed in. Which would you like to keep?',
+          'This phone has trips from a different account. Which would you '
+          'like to keep?',
         ),
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
@@ -109,31 +106,35 @@ class _AccountScreenState extends State<AccountScreen> {
     if (resolution == null) return;
 
     await _engine.resolveAccountMismatch(resolution);
-    await _run(_engine.sync);
+    await _syncNow();
   }
 
   Future<void> _confirmSignOut() async {
     final confirmed = await confirmDestructive(
       context,
-      title: 'Stop backing up?',
+      title: 'Sign out?',
       message:
-          'Your trips stay on this phone. They will no longer be copied to '
-          'your account, and this phone will not receive changes made '
-          'elsewhere.',
-      confirmLabel: 'Stop backup',
+          'You will need to sign in again to use Packmate. Anything not yet '
+          'synced will upload the next time you sign in on this phone.',
+      confirmLabel: 'Sign out',
     );
     if (!confirmed) return;
 
     setState(() => _busy = true);
-    await _engine.disableBackup();
-    if (!mounted) return;
-    setState(() => _busy = false);
-    await _refresh();
+    await signOutAndReturn(
+      auth: _auth,
+      sync: _engine,
+      onSignedOut: () {
+        widget.onSignedOut?.call();
+        // Back to the root, where the gate now shows sign-in.
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final backingUp = _accountId != null;
+    final session = _auth.session;
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -149,43 +150,26 @@ class _AccountScreenState extends State<AccountScreen> {
             children: [
               const _Header(),
               const SizedBox(height: AppSpacing.lg),
-              if (!syncConfigured)
-                const _NotConfiguredCard()
-              else ...[
-                _StatusCard(
-                  backingUp: backingUp,
-                  lastSyncedAt: _lastSyncedAt,
-                  busy: _busy,
-                ),
+              if (session != null) _IdentityCard(session: session),
+              const SizedBox(height: AppSpacing.md),
+              _SyncCard(lastSyncedAt: _lastSyncedAt, busy: _busy),
+              const SizedBox(height: AppSpacing.md),
+              if (_message != null) ...[
+                _MessageCard(message: _message!),
                 const SizedBox(height: AppSpacing.md),
-                if (_message != null) ...[
-                  _MessageCard(message: _message!),
-                  const SizedBox(height: AppSpacing.md),
-                ],
-                if (!backingUp)
-                  AppPrimaryButton(
-                    label: 'Back up my trips',
-                    icon: Icons.cloud_upload_outlined,
-                    loading: _busy,
-                    onPressed: _busy ? null : () => _run(_engine.enableBackup),
-                  )
-                else ...[
-                  AppSecondaryButton(
-                    label: 'Sync now',
-                    icon: Icons.sync_rounded,
-                    onPressed: _busy ? () {} : () => _run(_engine.sync),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  AppSecondaryButton(
-                    label: 'Stop backing up',
-                    icon: Icons.cloud_off_outlined,
-                    accent: AppColors.rose,
-                    onPressed: _busy ? () {} : _confirmSignOut,
-                  ),
-                ],
-                const SizedBox(height: AppSpacing.xl),
-                const _HonestyNote(),
               ],
+              AppSecondaryButton(
+                label: 'Sync now',
+                icon: Icons.sync_rounded,
+                onPressed: _busy ? () {} : _syncNow,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              AppSecondaryButton(
+                label: 'Sign out',
+                icon: Icons.logout_rounded,
+                accent: AppColors.rose,
+                onPressed: _busy ? () {} : _confirmSignOut,
+              ),
             ],
           ),
         ),
@@ -213,18 +197,15 @@ class _Header extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Backup', style: theme.textTheme.headlineSmall),
+              Text('Account', style: theme.textTheme.headlineSmall),
               const SizedBox(height: 2),
-              Text(
-                'Keep your trips if you lose this phone',
-                style: theme.textTheme.bodySmall,
-              ),
+              Text('Your trips, on every device', style: theme.textTheme.bodySmall),
             ],
           ),
         ),
         const SizedBox(width: AppSpacing.md),
         const AppIconTile(
-          icon: Icons.cloud_outlined,
+          icon: Icons.person_rounded,
           color: AppColors.primary,
         ),
       ],
@@ -232,23 +213,53 @@ class _Header extends StatelessWidget {
   }
 }
 
-class _StatusCard extends StatelessWidget {
-  final bool backingUp;
+class _IdentityCard extends StatelessWidget {
+  final Session session;
+
+  const _IdentityCard({required this.session});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = session.displayName;
+
+    return AppCard(
+      child: Row(
+        children: [
+          const AppIconTile(
+            icon: Icons.account_circle_outlined,
+            color: AppColors.primary,
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name == null || name.isEmpty ? 'Signed in' : name,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  session.email,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SyncCard extends StatelessWidget {
   final DateTime? lastSyncedAt;
   final bool busy;
 
-  const _StatusCard({
-    required this.backingUp,
-    required this.lastSyncedAt,
-    required this.busy,
-  });
+  const _SyncCard({required this.lastSyncedAt, required this.busy});
 
   String get _detail {
-    if (busy) return 'Working…';
-    if (!backingUp) {
-      return 'Your trips are on this phone only. Uninstalling the app or '
-          'losing the phone would lose them.';
-    }
+    if (busy) return 'Syncing…';
     final at = lastSyncedAt;
     if (at == null) return 'Waiting for the first sync.';
     return 'Last synced ${_relative(at)}.';
@@ -266,15 +277,13 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = backingUp ? AppColors.mint : AppColors.amber;
-
     return AppCard(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AppIconTile(
-            icon: backingUp ? Icons.cloud_done_outlined : Icons.phone_iphone,
-            color: color,
+            icon: busy ? Icons.sync_rounded : Icons.cloud_done_outlined,
+            color: AppColors.mint,
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -282,7 +291,7 @@ class _StatusCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  backingUp ? 'Backing up' : 'On this phone only',
+                  'Synced to your account',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 4),
@@ -308,75 +317,10 @@ class _MessageCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(
-            Icons.info_outline_rounded,
-            size: 18,
-            color: AppColors.amber,
-          ),
+          const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.amber),
           const SizedBox(width: AppSpacing.md),
           Expanded(
-            child: Text(
-              message,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// The caveat that stops "Backing up" from being read as a guarantee.
-class _HonestyNote extends StatelessWidget {
-  const _HonestyNote();
-
-  @override
-  Widget build(BuildContext context) {
-    return const FormHint(
-      'Backup currently uses an account with no email attached, so it can '
-      'restore your trips onto this phone but not onto a new one. Adding an '
-      'email — coming soon — is what makes them recoverable anywhere.',
-    );
-  }
-}
-
-class _NotConfiguredCard extends StatelessWidget {
-  const _NotConfiguredCard();
-
-  @override
-  Widget build(BuildContext context) {
-    return const AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              AppIconTile(
-                icon: Icons.cloud_off_outlined,
-                color: AppColors.textMuted,
-              ),
-              SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Text(
-                  'Backup is not available in this build',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.text,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: AppSpacing.md),
-          Text(
-            'Everything works exactly as before — your trips live on this '
-            'phone and never leave it.',
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.45,
-              color: AppColors.textMuted,
-            ),
+            child: Text(message, style: Theme.of(context).textTheme.bodyMedium),
           ),
         ],
       ),

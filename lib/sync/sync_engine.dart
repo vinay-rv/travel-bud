@@ -223,40 +223,16 @@ class SyncEngine {
   }
 
   // ---------------------------------------------------------------------------
-  // Turning backup on and off
+  // Account changes
   // ---------------------------------------------------------------------------
 
-  /// Opts this device into backup: creates an anonymous account, claims the
-  /// existing local data for it, and pushes everything up.
-  ///
-  /// This is the single moment data first leaves the device, which is why it
-  /// takes a deliberate action rather than happening at first launch.
-  Future<SyncOutcome> enableBackup() async {
-    try {
-      final existing = await remote.currentUserId();
-      if (existing == null) await remote.signInAnonymously();
-    } on SyncUnavailable {
-      // Nothing has changed: no account, no upload, nothing half-done.
-      return SyncOutcome.unavailable;
-    }
-    return sync();
-  }
-
-  /// Stops backing up on this device.
+  /// Call after signing out: forgets which account this device's rows belong
+  /// to and re-queues them all.
   ///
   /// The local database is left completely intact — the phone is the source of
-  /// truth. Everything is re-queued as unsynced so that whatever account is
-  /// used next receives all of it, rather than the rows sitting there looking
-  /// as though they had already been uploaded.
-  Future<void> disableBackup() async {
-    try {
-      await remote.signOut();
-    } on SyncUnavailable {
-      // Signing out is a local act; a dead network must not trap the user in a
-      // signed-in state.
-    }
-    await _forgetAccountAndRequeue();
-  }
+  /// truth. Re-queueing means whoever signs in next receives everything, rather
+  /// than rows sitting there looking as though they had already been uploaded.
+  Future<void> forgetAccount() => _forgetAccountAndRequeue();
 
   /// How to settle a device whose data belongs to one account when a different
   /// account has just signed in.
@@ -590,13 +566,6 @@ class _NoopRemote implements SyncRemote {
 
   @override
   Future<String?> currentUserId() async => null;
-
-  @override
-  Future<String> signInAnonymously() async =>
-      throw const SyncUnavailable('This build has no server configured');
-
-  @override
-  Future<void> signOut() async {}
 
   @override
   Future<List<PushedRow>> pushUpserts(

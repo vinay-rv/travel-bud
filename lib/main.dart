@@ -2,15 +2,17 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'auth/api_client.dart';
+import 'auth/auth_service.dart';
+import 'auth/session.dart';
 import 'data/database_helper.dart';
 import 'models/trip.dart';
+import 'screens/auth/auth_gate.dart';
 import 'screens/trip_detail_screen.dart';
-import 'screens/trip_list_screen.dart';
 import 'services/notification_platform.dart';
 import 'services/reminder_scheduler.dart';
-import 'sync/supabase_remote.dart';
+import 'sync/api_remote.dart';
 import 'sync/sync_config.dart';
 import 'sync/sync_engine.dart';
 import 'sync/sync_trigger.dart';
@@ -21,6 +23,16 @@ final navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Accounts and sync. No network here: the session is read from the device, so
+  // a signed-in user opens straight into their trips even with no connection.
+  final api = ApiClient(
+    baseUrl: Uri.parse(apiBaseUrl),
+    store: SecureSessionStore(),
+  );
+  Auth.install(AuthService(api));
+  Sync.instance = SyncEngine(db: DatabaseHelper.instance, remote: ApiRemote(api));
+  SyncTrigger(db: DatabaseHelper.instance, engine: () => Sync.instance).start();
 
   // Notifications only exist on mobile here; elsewhere the default no-op
   // scheduler stays in place.
@@ -43,44 +55,7 @@ Future<void> main() async {
     }
   }
 
-  await _initSync();
-
-  runApp(const TripInventoryApp());
-}
-
-/// Prepares backup and sync, if this build was configured for it.
-///
-/// Deliberately does not sign anyone in and makes no network call: backup is
-/// opt-in, so nothing about a user's trips leaves the device until they ask for
-/// it. `Supabase.initialize` only restores a session already stored locally.
-///
-/// Any failure here is swallowed for the same reason notification setup is
-/// (`notification_platform.dart`): the app has to open and work regardless.
-/// Until this succeeds, `Sync.instance` keeps its no-op remote and simply
-/// reports that there is no account.
-Future<void> _initSync() async {
-  if (!syncConfigured) return;
-
-  try {
-    await Supabase.initialize(
-      url: supabaseUrl,
-      publishableKey: supabaseAnonKey,
-    );
-    Sync.instance = SyncEngine(
-      db: DatabaseHelper.instance,
-      remote: SupabaseRemote(),
-    );
-    // From here sync looks after itself: on edits, and on returning to the
-    // foreground. No screen has to remember to ask.
-    SyncTrigger(db: DatabaseHelper.instance, engine: () => Sync.instance)
-        .start();
-    // Picks up anything left unsynced last time — a no-op unless the user has
-    // already opted in, since the engine stops at "no account".
-    unawaited(Sync.instance.sync());
-  } catch (error, stack) {
-    debugPrint('Sync unavailable this launch: $error');
-    debugPrintStack(stackTrace: stack);
-  }
+  runApp(const PackmateApp());
 }
 
 /// Payloads look like `trip:12`. Opens that trip's detail screen.
@@ -101,8 +76,8 @@ Future<void> _openTripFromPayload(String payload) async {
   );
 }
 
-class TripInventoryApp extends StatelessWidget {
-  const TripInventoryApp({super.key});
+class PackmateApp extends StatelessWidget {
+  const PackmateApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -111,7 +86,14 @@ class TripInventoryApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       theme: buildAppTheme(),
-      home: const TripListScreen(),
+      home: AuthGate(
+        auth: Auth.instance,
+        // Signing in is the one moment worth waiting on a sync: it is what
+        // brings an existing account's trips onto a new phone.
+        onSignedIn: () async {
+          await Sync.instance.sync();
+        },
+      ),
     );
   }
 }

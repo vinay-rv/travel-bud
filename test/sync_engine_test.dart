@@ -34,30 +34,15 @@ class FakeRemote implements SyncRemote {
 
   int _tick() => ++clock;
 
-  /// Ids handed out by [signInAnonymously], in order.
-  final List<String> anonymousIds = ['anon-1', 'anon-2'];
-  int signInCalls = 0;
-  int signOutCalls = 0;
+  /// Stands in for signing in and out, which now happens in the auth layer.
+  /// The engine only ever asks who is signed in.
+  void simulateSignIn(String id) => userId = id;
+  void simulateSignOut() => userId = null;
 
   @override
   Future<String?> currentUserId() async {
     if (offline) throw const SyncUnavailable('offline');
     return userId;
-  }
-
-  @override
-  Future<String> signInAnonymously() async {
-    if (offline) throw const SyncUnavailable('offline');
-    final id = anonymousIds[signInCalls.clamp(0, anonymousIds.length - 1)];
-    signInCalls++;
-    userId = id;
-    return id;
-  }
-
-  @override
-  Future<void> signOut() async {
-    signOutCalls++;
-    userId = null;
   }
 
   @override
@@ -630,68 +615,51 @@ void main() {
     });
   });
 
-  group('Opting in', () {
-    setUp(() {
-      // Nobody is signed in until the user asks for backup.
-      remote.userId = null;
-    });
-
-    test('creates an account and uploads what is already on the device',
-        () async {
+  group('Signing in', () {
+    test('uploads whatever the device already had', () async {
+      // Someone used the app on this phone, then signed in — either a fresh
+      // account or an existing one on a new device.
+      remote.simulateSignOut();
       final trip = await seedTrip();
       await db.createItem(Item(tripId: trip.id!, name: 'Passport'));
+      expect(await engine.sync(), SyncOutcome.noAccount);
 
-      expect(await engine.isBackingUp, isFalse);
-      expect(await engine.enableBackup(), SyncOutcome.ok);
+      remote.simulateSignIn('user-1');
+      expect(await engine.sync(), SyncOutcome.ok);
 
-      expect(remote.signInCalls, 1);
-      expect(await engine.claimedUserId(), 'anon-1');
+      expect(await engine.claimedUserId(), 'user-1');
       expect(remote.rowCount(DatabaseHelper.tableTrip), 1);
       expect(remote.rowCount(DatabaseHelper.tableItem), 1);
-      expect(await engine.isBackingUp, isTrue);
       expect(await engine.lastSyncedAt(), isNotNull);
     });
 
-    test('opting in with no connection leaves no half-finished state',
-        () async {
+    test('signing in offline leaves no half-finished state', () async {
       await seedTrip();
       remote.offline = true;
 
-      expect(await engine.enableBackup(), SyncOutcome.unavailable);
+      expect(await engine.sync(), SyncOutcome.unavailable);
 
-      // No account, nothing uploaded, and the data is still queued for when
-      // it does work.
+      // Nothing uploaded, nothing claimed, and the data is still queued.
       expect(await engine.claimedUserId(), isNull);
-      expect(await engine.isBackingUp, isFalse);
       expect(remote.rowCount(DatabaseHelper.tableTrip), 0);
-      final row = (await rawRows(DatabaseHelper.tableTrip)).single;
-      expect(row['dirty'], 1);
-    });
-
-    test('opting in twice does not create a second account', () async {
-      await seedTrip();
-      await engine.enableBackup();
-      await engine.enableBackup();
-
-      expect(remote.signInCalls, 1);
+      expect((await rawRows(DatabaseHelper.tableTrip)).single['dirty'], 1);
     });
   });
 
-  group('Opting out', () {
-    test('keeps the data and re-queues it for whatever account comes next',
+  group('Signing out', () {
+    test('keeps the data and re-queues it for whoever signs in next',
         () async {
       final trip = await seedTrip();
       await engine.sync();
       expect(await dirtyOf(DatabaseHelper.tableTrip, trip.id!), 0);
 
-      await engine.disableBackup();
+      await engine.forgetAccount();
 
-      expect(remote.signOutCalls, 1);
       expect(await engine.claimedUserId(), isNull);
       expect(await engine.lastSyncedAt(), isNull);
       // The phone is the source of truth: the trip is still here...
       expect((await db.getTrips()).single.name, 'Northeast India');
-      // ...and is queued, so a future account receives it rather than the row
+      // ...and is queued, so the next account receives it rather than the row
       // sitting there looking as though it had already been uploaded.
       expect(await dirtyOf(DatabaseHelper.tableTrip, trip.id!), 1);
     });

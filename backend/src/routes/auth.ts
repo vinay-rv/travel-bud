@@ -63,7 +63,20 @@ export async function authRoutes(
   app.post('/signup', async (request, reply) => {
     const body = signUpBody.parse(request.body);
     const user = await signUp(body.email, body.password, body.displayName);
-    await sendEmailVerification(user.id, user.email, mailer);
+
+    try {
+      await sendEmailVerification(user.id, user.email, mailer);
+    } catch (error) {
+      // The account exists but the code never went out. Say so plainly instead
+      // of a bare 500: the caller can retry, and signing up again with an
+      // unconfirmed address resends rather than colliding.
+      request.log.error({ err: error }, 'Verification email failed');
+      throw new AuthError(
+        502,
+        'email_send_failed',
+        'We could not send your confirmation email. Please try again.',
+      );
+    }
 
     return reply.status(201).send({
       status: 'verification_required',

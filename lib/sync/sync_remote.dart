@@ -72,18 +72,10 @@ class SyncUnavailable implements Exception {
 }
 
 abstract class SyncRemote {
-  /// The signed-in account, or null when there isn't one. Null means sync is
-  /// simply not switched on yet, which is the default state of the app.
+  /// The signed-in account, or null when there isn't one. Signing in and out
+  /// is the account layer's business; sync only needs to know whose data it is
+  /// moving, and to stop when the answer is nobody.
   Future<String?> currentUserId();
-
-  /// Creates an account without asking for any personal details, returning its
-  /// id. Called the moment the user opts into backup and never before — until
-  /// then nothing about their trips leaves the device.
-  Future<String> signInAnonymously();
-
-  /// Ends the session. The local database is untouched; the phone remains the
-  /// source of truth whether or not anyone is signed in.
-  Future<void> signOut();
 
   /// Upserts [rows] into [table], keyed by uuid, returning the server
   /// timestamp it assigned to each.

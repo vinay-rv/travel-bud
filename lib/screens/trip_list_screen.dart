@@ -17,7 +17,10 @@ class TripListScreen extends StatefulWidget {
   /// Injectable for tests; defaults to the app-wide singleton.
   final DatabaseHelper? db;
 
-  const TripListScreen({super.key, this.db});
+  /// Lets the account screen end the session and send the app back to sign-in.
+  final VoidCallback? onSignedOut;
+
+  const TripListScreen({super.key, this.db, this.onSignedOut});
 
   @override
   State<TripListScreen> createState() => _TripListScreenState();
@@ -76,7 +79,9 @@ class _TripListScreenState extends State<TripListScreen> {
 
   Future<void> _openBackup() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AccountScreen()),
+      MaterialPageRoute(
+        builder: (_) => AccountScreen(onSignedOut: widget.onSignedOut),
+      ),
     );
   }
 

@@ -1,32 +1,22 @@
-/// Build-time configuration for backup and sync.
+/// Where the Packmate API lives.
 ///
-/// Supplied with `--dart-define`, e.g.
+/// Supplied with `--dart-define`:
 ///
 /// ```sh
-/// flutter run \
-///   --dart-define=SYNC_ENABLED=true \
-///   --dart-define=SUPABASE_URL=https://xxxx.supabase.co \
-///   --dart-define=SUPABASE_ANON_KEY=eyJ...
+/// flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
 /// ```
 ///
-/// The key Supabase now calls the *publishable* key (previously the anon key)
-/// is publishable by design — it identifies the project, and row level security
-/// is what actually protects the data, so a key baked into the app is not a
-/// secret being leaked. The **service role** key is a different matter entirely
-/// and must never appear anywhere in this project; it belongs only in Edge
-/// Functions.
+/// Note the host: an Android emulator reaches the machine it runs on at
+/// `10.0.2.2`, never `localhost` — that would be the emulator itself. An iOS
+/// simulator shares the host's network, so `localhost` works there, and a real
+/// phone needs the machine's LAN address.
 library;
 
-/// Master switch. Off by default, so a build without the define behaves exactly
-/// as the app did before sync existed: no network, no account, nothing to go
-/// wrong.
-const syncEnabled = bool.fromEnvironment('SYNC_ENABLED');
+const apiBaseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://localhost:8080',
+);
 
-const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-
-const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
-
-/// Whether there is actually somewhere to sync to. A build with the flag on but
-/// no project details is treated as off rather than crashing on startup.
-bool get syncConfigured =>
-    syncEnabled && supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
+/// Whether this build has somewhere to talk to. Always true in practice — the
+/// app requires an account — but keeps the default explicit and overridable.
+bool get apiConfigured => apiBaseUrl.isNotEmpty;

@@ -73,10 +73,25 @@ export async function signUp(
 ): Promise<User> {
   const email = normaliseEmail(emailInput);
   const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    // Deliberately the same 409 whether or not a password is set, so this
-    // cannot be used to discover which addresses are registered.
+
+  if (existing?.emailVerified) {
     throw new AuthError(409, 'email_taken', 'That email is already registered');
+  }
+
+  if (existing) {
+    // An account that was started but never confirmed. Signing up again is the
+    // obvious thing to try when the first code never arrived, so treat it as
+    // exactly that: update the password and let the caller send a fresh code.
+    //
+    // Without this, a failed verification email strands the account — sign-up
+    // says "already registered" and there is no code to verify with.
+    return prisma.user.update({
+      where: { id: existing.id },
+      data: {
+        passwordHash: await hash(password),
+        displayName: displayName?.trim() || existing.displayName,
+      },
+    });
   }
 
   return prisma.user.create({
