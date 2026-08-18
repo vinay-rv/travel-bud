@@ -85,7 +85,7 @@ class ReminderScheduler {
       return 'Leaving ${stay.hotelName}. Everything on your list is packed — '
           'do a last sweep of the room.';
     }
-    final names = unpacked.map((i) => i.name).toList();
+    final names = unpacked.map((i) => i.displayName).toList();
     final shown = names.take(3).join(', ');
     final rest = names.length - 3;
     final tail = rest > 0 ? ', and $rest more' : '';

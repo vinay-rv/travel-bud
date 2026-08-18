@@ -290,12 +290,17 @@ class AppEmptyState extends StatelessWidget {
   final String message;
   final Color accent;
 
+  /// Optional call to action shown under the copy — the way out of the empty
+  /// state, when there is one beyond the screen's own FAB.
+  final Widget? action;
+
   const AppEmptyState({
     super.key,
     required this.icon,
     required this.title,
     required this.message,
     this.accent = AppColors.primary,
+    this.action,
   });
 
   @override
@@ -330,6 +335,10 @@ class AppEmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium,
             ),
+            if (action != null) ...[
+              const SizedBox(height: AppSpacing.xl),
+              action!,
+            ],
           ],
         ),
       ),
@@ -382,7 +391,18 @@ class AppRowMenu extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  const AppRowMenu({super.key, required this.onEdit, required this.onDelete});
+  /// The first entry is "Edit" on rows that open an editor; screens that only
+  /// show the row's contents override the wording.
+  final String editLabel;
+  final IconData editIcon;
+
+  const AppRowMenu({
+    super.key,
+    required this.onEdit,
+    required this.onDelete,
+    this.editLabel = 'Edit',
+    this.editIcon = Icons.edit_outlined,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -395,19 +415,19 @@ class AppRowMenu extends StatelessWidget {
         if (value == 'edit') onEdit();
         if (value == 'delete') onDelete();
       },
-      itemBuilder: (context) => const [
+      itemBuilder: (context) => [
         PopupMenuItem(
           value: 'edit',
           height: 44,
           child: Row(
             children: [
-              Icon(Icons.edit_outlined, size: 18, color: AppColors.textMuted),
-              SizedBox(width: 10),
-              Text('Edit'),
+              Icon(editIcon, size: 18, color: AppColors.textMuted),
+              const SizedBox(width: 10),
+              Text(editLabel),
             ],
           ),
         ),
-        PopupMenuItem(
+        const PopupMenuItem(
           value: 'delete',
           height: 44,
           child: Row(
@@ -461,6 +481,104 @@ Future<bool> confirmDestructive(
     ),
   );
   return result ?? false;
+}
+
+/// Asks for a single line of text. Returns the trimmed value, or null if the
+/// user cancelled or left it empty.
+Future<String?> promptForText(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String label,
+  required String actionLabel,
+  String initialValue = '',
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (context) => _TextPromptDialog(
+      title: title,
+      message: message,
+      label: label,
+      actionLabel: actionLabel,
+      initialValue: initialValue,
+    ),
+  );
+}
+
+/// Owns its controller so it lives exactly as long as the dialog does —
+/// disposing alongside the future would kill it mid dismiss-animation.
+class _TextPromptDialog extends StatefulWidget {
+  final String title;
+  final String message;
+  final String label;
+  final String actionLabel;
+  final String initialValue;
+
+  const _TextPromptDialog({
+    required this.title,
+    required this.message,
+    required this.label,
+    required this.actionLabel,
+    required this.initialValue,
+  });
+
+  @override
+  State<_TextPromptDialog> createState() => _TextPromptDialogState();
+}
+
+class _TextPromptDialogState extends State<_TextPromptDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final trimmed = _controller.text.trim();
+    if (trimmed.isNotEmpty) Navigator.of(context).pop(trimmed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.message, style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: AppSpacing.lg),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: InputDecoration(labelText: widget.label),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(0, 46)),
+          onPressed: _submit,
+          child: Text(widget.actionLabel),
+        ),
+      ],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -746,6 +864,202 @@ class AppFab extends StatelessWidget {
         highlightElevation: 0,
         icon: Icon(icon),
         label: Text(label),
+      ),
+    );
+  }
+}
+
+/// Quiet companion to [AppPrimaryButton]: a tinted surface with a hairline
+/// border, for actions that shouldn't compete with the main call to action.
+class AppSecondaryButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onPressed;
+
+  const AppSecondaryButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.accent = AppColors.primary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: accent.withValues(alpha: 0.28)),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 13,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 17, color: accent),
+              const SizedBox(width: AppSpacing.sm),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact inline action — used for "Pack all" / "Unpack all" on the packing
+/// list headers, where a full button would drown the row.
+class AppTextAction extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPressed;
+
+  const AppTextAction({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.color = AppColors.primary,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// − count + control for how many of an item to bring. Never goes below one:
+/// bringing zero of something means deleting it.
+class AppQuantityStepper extends StatelessWidget {
+  final int quantity;
+  final ValueChanged<int> onChanged;
+  final Color accent;
+
+  const AppQuantityStepper({
+    super.key,
+    required this.quantity,
+    required this.onChanged,
+    this.accent = AppColors.primary,
+  });
+
+  static const _min = 1;
+  static const _max = 99;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(AppRadius.pill),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _StepButton(
+            icon: Icons.remove_rounded,
+            tooltip: 'One fewer',
+            color: accent,
+            onPressed: quantity > _min ? () => onChanged(quantity - 1) : null,
+          ),
+          SizedBox(
+            width: 24,
+            child: Text(
+              '$quantity',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text,
+              ),
+            ),
+          ),
+          _StepButton(
+            icon: Icons.add_rounded,
+            tooltip: 'One more',
+            color: accent,
+            onPressed: quantity < _max ? () => onChanged(quantity + 1) : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final Color color;
+  final VoidCallback? onPressed;
+
+  const _StepButton({
+    required this.icon,
+    required this.tooltip,
+    required this.color,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: 34,
+          height: 34,
+          child: Icon(
+            icon,
+            size: 17,
+            color: onPressed == null ? AppColors.textFaint : color,
+          ),
+        ),
       ),
     );
   }

@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
 
+    <!-- Backing up trips talks to Supabase. This has to be declared HERE, not
+         only in the debug/profile manifests Flutter generates: without it,
+         debug builds work perfectly and release builds cannot open a socket. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="Packmate"
         android:name="${applicationName}"

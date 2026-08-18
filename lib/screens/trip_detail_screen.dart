@@ -119,6 +119,7 @@ class _TripDetailScreenState extends State<TripDetailScreen>
                     ChecklistView(
                       key: _itemsKey,
                       tripId: _trip.id!,
+                      tripName: _trip.name,
                       db: widget.db,
                     ),
                     const AppEmptyState(

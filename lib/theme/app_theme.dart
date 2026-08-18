@@ -24,13 +24,16 @@ class AppColors {
   static const rose = Color(0xFFFF8FA3);
   static const violet = Color(0xFFB79CFF);
 
+  /// Neutral-but-visible accent for the catch-all "Other" category: reads as
+  /// unclassified without looking disabled when selected.
+  static const steel = Color(0xFF9AAAC9);
+
   // Text.
   static const text = Color(0xFFEDF0F7);
   static const textMuted = Color(0xFF98A2B6);
   static const textFaint = Color(0xFF6B7488);
 }
 
-/// Corner radii, in one place so cards, fields, and sheets stay in step.
 /// Fills for the primary call-to-action surfaces. Buttons are the one place
 /// the UI carries a solid fill, so they use a deep gradient with white text
 /// rather than a flat saturated slab — loud enough to lead, quiet enough to
@@ -54,6 +57,7 @@ class AppGradients {
   static const buttonHighlight = Color(0x26FFFFFF);
 }
 
+/// Corner radii, in one place so cards, fields, and sheets stay in step.
 class AppRadius {
   AppRadius._();
 

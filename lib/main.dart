@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'data/database_helper.dart';
 import 'models/trip.dart';
@@ -9,6 +10,10 @@ import 'screens/trip_detail_screen.dart';
 import 'screens/trip_list_screen.dart';
 import 'services/notification_platform.dart';
 import 'services/reminder_scheduler.dart';
+import 'sync/supabase_remote.dart';
+import 'sync/sync_config.dart';
+import 'sync/sync_engine.dart';
+import 'sync/sync_trigger.dart';
 import 'theme/app_theme.dart';
 
 /// Lets a notification tap push a route from outside the widget tree.
@@ -38,7 +43,44 @@ Future<void> main() async {
     }
   }
 
+  await _initSync();
+
   runApp(const TripInventoryApp());
+}
+
+/// Prepares backup and sync, if this build was configured for it.
+///
+/// Deliberately does not sign anyone in and makes no network call: backup is
+/// opt-in, so nothing about a user's trips leaves the device until they ask for
+/// it. `Supabase.initialize` only restores a session already stored locally.
+///
+/// Any failure here is swallowed for the same reason notification setup is
+/// (`notification_platform.dart`): the app has to open and work regardless.
+/// Until this succeeds, `Sync.instance` keeps its no-op remote and simply
+/// reports that there is no account.
+Future<void> _initSync() async {
+  if (!syncConfigured) return;
+
+  try {
+    await Supabase.initialize(
+      url: supabaseUrl,
+      publishableKey: supabaseAnonKey,
+    );
+    Sync.instance = SyncEngine(
+      db: DatabaseHelper.instance,
+      remote: SupabaseRemote(),
+    );
+    // From here sync looks after itself: on edits, and on returning to the
+    // foreground. No screen has to remember to ask.
+    SyncTrigger(db: DatabaseHelper.instance, engine: () => Sync.instance)
+        .start();
+    // Picks up anything left unsynced last time — a no-op unless the user has
+    // already opted in, since the engine stops at "no account".
+    unawaited(Sync.instance.sync());
+  } catch (error, stack) {
+    debugPrint('Sync unavailable this launch: $error');
+    debugPrintStack(stackTrace: stack);
+  }
 }
 
 /// Payloads look like `trip:12`. Opens that trip's detail screen.
