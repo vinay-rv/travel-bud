@@ -245,13 +245,20 @@ class _Greeting extends StatelessWidget {
             children: [
               const AppLogo(),
               const SizedBox(width: AppSpacing.md),
-              Text(
-                'Packmate',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  letterSpacing: 0.2,
+              // Takes the slack rather than a Spacer: with two icon buttons and
+              // the count pill also on this row, a fixed-width brand overflows
+              // on a 360dp phone or at a large text scale.
+              Expanded(
+                child: Text(
+                  'Packmate',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    letterSpacing: 0.2,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: AppSpacing.sm),
               AppPill(
                 label: trips.isEmpty
                     ? 'Empty'

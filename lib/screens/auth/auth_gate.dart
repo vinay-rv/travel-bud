@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../auth/auth_service.dart';
+import '../../data/database_helper.dart';
 import '../../sync/sync_engine.dart';
 import '../../theme/app_theme.dart';
 import '../trip_list_screen.dart';
@@ -15,11 +18,15 @@ import 'sign_in_screen.dart';
 class AuthGate extends StatefulWidget {
   final AuthService auth;
 
-  /// Runs after a successful sign-in, before the app appears — the moment to
-  /// pull down whatever the account already has.
+  /// Injectable for tests; the app-wide singleton otherwise.
+  final DatabaseHelper? db;
+
+  /// Runs after a successful sign-in to pull down whatever the account already
+  /// has. Deliberately not awaited before the app appears: it is a background
+  /// refresh, not a gate.
   final Future<void> Function()? onSignedIn;
 
-  const AuthGate({super.key, required this.auth, this.onSignedIn});
+  const AuthGate({super.key, required this.auth, this.onSignedIn, this.db});
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -40,9 +47,27 @@ class _AuthGateState extends State<AuthGate> {
     if (mounted) setState(() => _signedIn = session != null);
   }
 
-  Future<void> _handleSignedIn() async {
-    await widget.onSignedIn?.call();
-    if (mounted) setState(() => _signedIn = true);
+  void _handleSignedIn() {
+    if (!mounted) return;
+
+    // Show the app first. The trips live on the device, so there is nothing to
+    // wait for — and a sync that is slow, or wedged, must never leave someone
+    // staring at a spinner on the sign-in button.
+    setState(() => _signedIn = true);
+
+    // Sign-up and confirm-email are pushed on top of this gate. Swapping the
+    // child underneath them is not enough: without this the user stays on the
+    // code screen and nothing appears to happen.
+    Navigator.of(context).popUntil((route) => route.isFirst);
+
+    // Now pull down whatever the account already has, in the background.
+    unawaited(Future<void>.sync(() async {
+      try {
+        await widget.onSignedIn?.call();
+      } catch (error) {
+        debugPrint('First sync after sign-in failed: $error');
+      }
+    }));
   }
 
   /// Called when the session ends, from the account screen or because the
@@ -67,7 +92,7 @@ class _AuthGateState extends State<AuthGate> {
           return SignInScreen(auth: widget.auth, onSignedIn: _handleSignedIn);
         }
 
-        return TripListScreen(onSignedOut: handleSignedOut);
+        return TripListScreen(db: widget.db, onSignedOut: handleSignedOut);
       },
     );
   }

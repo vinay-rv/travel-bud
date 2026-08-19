@@ -93,8 +93,11 @@ class _SignInScreenState extends State<SignInScreen> {
       busy: _busy,
       onAction: _submit,
 
-      footer: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      // Wraps rather than a Row: "New here?" plus the action does not fit on
+      // one line on a 360dp phone, or at a large text scale.
+      footer: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Text(
             'New here?',
