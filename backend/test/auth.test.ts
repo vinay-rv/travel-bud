@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   codeFor,
@@ -282,5 +282,76 @@ describe('Password reset', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: 'sent' });
     expect(mailer.sent).toHaveLength(0);
+  });
+});
+
+describe('Choosing a mailer', () => {
+  // The console driver exists so sign-up can be developed before a sending
+  // domain is verified. The risk it introduces is shipping by accident, so the
+  // guard against that is what these pin down.
+  const original = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...original };
+    vi.resetModules();
+  });
+
+  const loadMailer = async () => {
+    vi.resetModules();
+    return import('../src/lib/mailer.js');
+  };
+
+  it('uses the real provider when credentials are present', async () => {
+    process.env.RESEND_API_KEY = 're_test';
+    process.env.MAIL_FROM = 'Packmate <hello@example.com>';
+
+    const { createMailer, ResendMailer } = await loadMailer();
+    expect(createMailer()).toBeInstanceOf(ResendMailer);
+  });
+
+  it('falls back to printing in development when they are missing', async () => {
+    delete process.env.RESEND_API_KEY;
+    delete process.env.MAIL_FROM;
+    process.env.NODE_ENV = 'development';
+
+    const { createMailer, ConsoleMailer } = await loadMailer();
+    expect(createMailer()).toBeInstanceOf(ConsoleMailer);
+  });
+
+  it('refuses to start in production without a real provider', async () => {
+    delete process.env.RESEND_API_KEY;
+    delete process.env.MAIL_FROM;
+    process.env.NODE_ENV = 'production';
+
+    const { createMailer } = await loadMailer();
+    // Codes that never arrive *and* get written to the log is the worst of
+    // both outcomes, so this must be impossible rather than merely discouraged.
+    expect(() => createMailer()).toThrow(/not configured/i);
+  });
+
+  it('prints the code where a developer will see it', async () => {
+    const { ConsoleMailer } = await loadMailer();
+    const written: string[] = [];
+    const restore = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      await new ConsoleMailer().send({
+        to: 'traveller@example.com',
+        subject: 'Confirm your email',
+        text: 'Your code is 123456',
+      });
+    } finally {
+      process.stdout.write = restore;
+    }
+
+    const output = written.join('');
+    expect(output).toContain('123456');
+    expect(output).toContain('traveller@example.com');
+    // Unmistakable in a scroll of request logs.
+    expect(output).toContain('DEV MAILER');
   });
 });

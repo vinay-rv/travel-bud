@@ -12,6 +12,8 @@ const schema = z.object({
   // that looks fine forever and then doesn't.
   ACCESS_TOKEN_SECRET: z.string().min(32),
   PORT: z.coerce.number().int().positive().default(8080),
+  // Guards the console mailer: it refuses to run when this says production.
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   // Comma-separated allowlists for federated sign-in. Empty disables it, which
   // is the right default: accepting an ID token without checking its audience
   // would let a token minted for any other app sign in here.
