@@ -10,10 +10,7 @@ import 'package:packmate/auth/session.dart';
 import 'package:packmate/data/database_helper.dart';
 import 'package:packmate/models/trip.dart';
 import 'package:packmate/screens/account_screen.dart';
-import 'package:packmate/sync/sync_engine.dart';
 import 'package:packmate/theme/app_theme.dart';
-
-import 'sync_engine_test.dart' show FakeRemote;
 
 // See trip_flow_test.dart for why DB work runs inside runAsync and why we avoid
 // pumpAndSettle.
@@ -43,15 +40,11 @@ void main() {
   });
 
   late DatabaseHelper db;
-  late FakeRemote remote;
-  late SyncEngine engine;
   late AuthService auth;
   late InMemorySessionStore store;
 
   setUp(() async {
     db = DatabaseHelper.forTesting(inMemoryDatabasePath);
-    remote = FakeRemote();
-    engine = SyncEngine(db: db, remote: remote);
     store = InMemorySessionStore();
     await store.write(const Session(
       userId: 'user-1',
@@ -82,11 +75,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: buildAppTheme(),
-        home: AccountScreen(
-          auth: auth,
-          engine: engine,
-          onSignedOut: onSignedOut,
-        ),
+        home: AccountScreen(auth: auth, db: db, onSignedOut: onSignedOut),
       ),
     );
     await settle(tester);
@@ -100,46 +89,15 @@ void main() {
     expect(find.text('traveller@example.com'), findsOneWidget);
   }, timeout: _timeout);
 
-  testWidgets('offers no way to turn syncing off', (tester) async {
+  testWidgets('shows nothing about syncing', (tester) async {
     await open(tester);
 
-    // Sync is how an account works, not a feature to opt into — the old
-    // "Back up my trips" opt-in should be gone entirely.
+    // The server owns the data and the app writes straight to it, so there is
+    // no sync state to report and nothing to switch on or off.
+    expect(find.text('Sync now'), findsNothing);
+    expect(find.textContaining('Last synced'), findsNothing);
     expect(find.text('Back up my trips'), findsNothing);
-    expect(find.text('Stop backing up'), findsNothing);
-    expect(find.text('Sync now'), findsOneWidget);
     expect(find.text('Sign out'), findsOneWidget);
-  }, timeout: _timeout);
-
-  testWidgets('syncing reports when it last succeeded', (tester) async {
-    await real(
-      tester,
-      () => db.createTrip(Trip(
-        name: 'Northeast India',
-        startDate: DateTime(2026, 3, 1),
-        endDate: DateTime(2026, 3, 8),
-      )),
-    );
-    await open(tester);
-
-    await tester.tap(find.text('Sync now'));
-    for (var i = 0; i < 4; i++) {
-      await settle(tester);
-    }
-
-    expect(find.textContaining('Last synced'), findsOneWidget);
-    expect(await real(tester, () => engine.lastSyncedAt()), isNotNull);
-  }, timeout: _timeout);
-
-  testWidgets('being offline is explained, not treated as an error',
-      (tester) async {
-    remote.offline = true;
-    await open(tester);
-
-    await tester.tap(find.text('Sync now'));
-    await settle(tester);
-
-    expect(find.textContaining('safe on this phone'), findsOneWidget);
   }, timeout: _timeout);
 
   testWidgets('signing out clears the session and hands back to the gate',
@@ -157,9 +115,8 @@ void main() {
     expect(await real(tester, () => store.read()), isNull);
   }, timeout: _timeout);
 
-  testWidgets('signing out re-queues the trips for the next account',
-      (tester) async {
-    final trip = await real(
+  testWidgets('signing out empties the cached trips', (tester) async {
+    await real(
       tester,
       () => db.createTrip(Trip(
         name: 'Northeast India',
@@ -167,7 +124,6 @@ void main() {
         endDate: DateTime(2026, 3, 8),
       )),
     );
-    await real(tester, () => engine.sync());
     await open(tester);
 
     await tester.tap(find.text('Sign out'));
@@ -175,19 +131,8 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Sign out'));
     await settle(tester);
 
-    // The phone keeps everything, and it is queued so the next sign-in
-    // uploads it rather than it looking already-synced.
-    final rows = await real(
-      tester,
-      () async => (await db.database).query(
-        DatabaseHelper.tableTrip,
-        columns: ['dirty'],
-        where: 'id = ?',
-        whereArgs: [trip.id],
-      ),
-    );
-    expect(rows.single['dirty'], 1);
-    expect((await real(tester, () => db.getTrips())).single.name,
-        'Northeast India');
+    // The cache holds one account's trips. Leaving them for whoever signs in
+    // next would be confusing, and a small privacy leak.
+    expect(await real(tester, () => db.getTrips()), isEmpty);
   }, timeout: _timeout);
 }

@@ -64,6 +64,16 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         _busy = false;
         _error = 'Cannot reach Packmate. Check your connection and try again.';
       });
+        } catch (error) {
+      // Anything unforeseen — a missing platform plugin, a malformed response.
+      // Whatever it is, the button must stop spinning and say something, or the
+      // screen simply hangs with no way forward.
+      debugPrint('Requesting a reset code failed: $error');
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'Something went wrong. Please try again.';
+      });
     }
   }
 
@@ -99,6 +109,16 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       setState(() {
         _busy = false;
         _error = 'Cannot reach Packmate. Check your connection and try again.';
+      });
+        } catch (error) {
+      // Anything unforeseen — a missing platform plugin, a malformed response.
+      // Whatever it is, the button must stop spinning and say something, or the
+      // screen simply hangs with no way forward.
+      debugPrint('Resetting the password failed: $error');
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'Something went wrong. Please try again.';
       });
     }
   }

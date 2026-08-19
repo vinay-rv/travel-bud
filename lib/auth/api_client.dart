@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'session.dart';
@@ -63,19 +64,34 @@ class ApiClient {
   bool get isSignedIn => _session != null;
 
   /// Called by whoever changes the session — sign-in, sign-out, refresh.
+  ///
+  /// Persistence is best-effort on purpose. A keystore that refuses to write —
+  /// a device with a broken one, or a build where the plugin is missing — must
+  /// not stop someone signing in. They stay signed in for this run and are
+  /// asked again next launch, which is a far better outcome than a sign-in
+  /// button that fails with no explanation.
   Future<void> setSession(Session? session) async {
     _session = session;
-    if (session == null) {
-      await store.clear();
-    } else {
-      await store.write(session);
+    try {
+      if (session == null) {
+        await store.clear();
+      } else {
+        await store.write(session);
+      }
+    } catch (error) {
+      debugPrint('Could not persist the session: $error');
     }
   }
 
   /// Restores a session saved on a previous launch. Purely local: no network,
   /// so the app opens instantly and works offline.
   Future<Session?> restore() async {
-    _session = await store.read();
+    try {
+      _session = await store.read();
+    } catch (error) {
+      debugPrint('Could not read the stored session: $error');
+      _session = null;
+    }
     return _session;
   }
 

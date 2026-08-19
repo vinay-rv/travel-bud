@@ -72,6 +72,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
         _busy = false;
         _error = 'Cannot reach Packmate. Check your connection and try again.';
       });
+        } catch (error) {
+      // Anything unforeseen — a missing platform plugin, a malformed response.
+      // Whatever it is, the button must stop spinning and say something, or the
+      // screen simply hangs with no way forward.
+      debugPrint('Sign-up failed: $error');
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = 'Something went wrong. Please try again.';
+      });
     }
   }
 

@@ -106,6 +106,42 @@ void main() {
         reason: 'signing in should show the app immediately, not wait on sync');
   }, timeout: _timeout);
 
+  testWidgets('an unexpected failure stops the spinner and says something',
+      (tester) async {
+    // The real case this comes from: the secure storage plugin was missing from
+    // the installed build, so writing the session threw MissingPluginException
+    // — a type no handler expected. The button span forever with no message.
+    final auth = AuthService(ApiClient(
+      baseUrl: Uri.parse('https://api.test'),
+      store: store,
+      httpClient: MockClient((_) async => throw StateError('unexpected')),
+    ));
+
+    tester.view.physicalSize = const Size(1080, 2200);
+    tester.view.devicePixelRatio = 3.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppTheme(),
+        home: AuthGate(auth: auth, db: db),
+      ),
+    );
+    await settle(tester);
+
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Email'), 'traveller@example.com');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'), 'correct-horse-battery');
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    await settle(tester);
+
+    // Still on sign-in, but with an explanation and a usable button.
+    expect(find.text('Welcome back'), findsOneWidget);
+    expect(find.textContaining('Something went wrong'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing,
+        reason: 'the button must not be left spinning');
+  }, timeout: _timeout);
+
   testWidgets('confirming the emailed code lands on the trips, not a spinner',
       (tester) async {
     await pumpGate(tester);

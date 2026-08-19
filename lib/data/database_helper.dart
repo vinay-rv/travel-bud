@@ -10,6 +10,7 @@ import '../models/item.dart';
 import '../models/document.dart';
 import '../models/item_category.dart';
 import '../models/packing_list.dart';
+import 'remote_store.dart';
 
 /// Single point of access to the on-device SQLite database. Owns the schema,
 /// the connection, and CRUD for all seven tables.
@@ -62,6 +63,10 @@ class DatabaseHelper {
 
   final String? _explicitPath;
   Database? _db;
+
+  /// The server this cache mirrors. Null before sign-in, and in tests, where
+  /// writes stay local.
+  RemoteStore? remote;
 
   Future<Database> get database async {
     return _db ??= await _open();
@@ -471,13 +476,159 @@ class DatabaseHelper {
     };
   }
 
+
+  // ---------------------------------------------------------------------------
+  // Writing
+  // ---------------------------------------------------------------------------
+  //
+  // The server owns the data; this database is a cache of it. So every write
+  // goes to the server first and is only mirrored locally once accepted. If the
+  // server refuses or cannot be reached, nothing is written here either — a
+  // cached row the server never saw would simply vanish at the next refresh,
+  // which is worse than an honest failure.
+  //
+  // With no [remote] set, these are pure local writes. That is what the tests
+  // use, and what the app does before anyone signs in.
+
+  /// Inserts, returning the new local id.
+  Future<int> _insertRow(String table, Map<String, Object?> values) async {
+    final db = await database;
+    final stamped = _stampNew(values);
+    await _pushUpsert(table, stamped);
+    return db.insert(table, stamped);
+  }
+
+  /// Updates the row with [id], returning rows changed.
+  Future<int> _updateRow(
+    String table,
+    Map<String, Object?> values,
+    int id,
+  ) async {
+    final db = await database;
+    final stamped = _stampChanged(values);
+    final uuid = await _uuidOf(table, id);
+    if (uuid != null) {
+      // Send the whole row, not just the changed fields: the server upserts,
+      // and a partial row would blank the columns left out.
+      final full = await _rowOf(table, id);
+      if (full != null) await _pushUpsert(table, {...full, ...stamped});
+    }
+    return db.update(table, stamped, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Deletes the row with [id], returning rows deleted.
+  Future<int> _deleteRow(String table, int id) async {
+    final db = await database;
+    final uuid = await _uuidOf(table, id);
+    if (uuid != null && remote != null && remoteTableFor(table) != null) {
+      await remote!.remove(table, uuid);
+    }
+    return db.delete(table, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> _pushUpsert(String table, Map<String, Object?> row) async {
+    final spec = remoteTableFor(table);
+    if (remote == null || spec == null) return;
+
+    final wire = <String, Object?>{};
+    for (final entry in row.entries) {
+      if (localOnlyColumns.contains(entry.key)) continue;
+      if (entry.key == spec.parentColumn) continue;
+      wire[entry.key] = entry.value;
+    }
+    if (spec.hasParent) {
+      final parentUuid =
+          await _uuidOf(spec.parentTable!, row[spec.parentColumn!] as int);
+      if (parentUuid == null) return;
+      wire[spec.parentWireColumn!] = parentUuid;
+    }
+    await remote!.upsert(table, wire);
+  }
+
+  Future<String?> _uuidOf(String table, int id) async {
+    final db = await database;
+    final rows = await db.query(table,
+        columns: ['uuid'], where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first['uuid'] as String?;
+  }
+
+  Future<Map<String, Object?>?> _rowOf(String table, int id) async {
+    final db = await database;
+    final rows =
+        await db.query(table, where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : Map<String, Object?>.from(rows.first);
+  }
+
+  /// Empties the cache, without touching the server.
+  ///
+  /// Used on sign-out: this holds one account's trips, and leaving them for
+  /// whoever signs in next would be both confusing and a small privacy leak.
+  Future<void> clearCache() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (final table in remoteTables.reversed) {
+        await txn.delete(table.name);
+      }
+      await txn.delete(tableDocument);
+    });
+  }
+
+  /// Replaces the cache with what the server holds.
+  ///
+  /// The server is the source of truth, so this is a straight overwrite rather
+  /// than a merge — there is nothing to reconcile, because nothing is ever
+  /// written here that the server did not already accept.
+  ///
+  /// Parents before children, so a row's foreign key resolves as it lands.
+  Future<void> refreshFromServer() async {
+    final store = remote;
+    if (store == null) return;
+
+    final db = await database;
+    final fetched = <String, List<Map<String, Object?>>>{};
+    for (final table in remoteTables) {
+      fetched[table.name] = await store.fetchAll(table.name);
+    }
+
+    // Everything arrived before anything is dropped: a failure halfway through
+    // must not leave the phone with less than it started with.
+    await db.transaction((txn) async {
+      for (final table in remoteTables.reversed) {
+        await txn.delete(table.name);
+      }
+      final idsByUuid = <String, Map<String, int>>{};
+      for (final table in remoteTables) {
+        final localIds = <String, int>{};
+        for (final row in fetched[table.name]!) {
+          final values = <String, Object?>{};
+          for (final entry in row.entries) {
+            if (entry.key == table.parentWireColumn) continue;
+            if (entry.key == 'userId') continue;
+            if (entry.key.endsWith('At') && entry.value == null) continue;
+            values[entry.key] = entry.value;
+          }
+          if (table.hasParent) {
+            final parentUuid = row[table.parentWireColumn!] as String?;
+            final parentId = idsByUuid[table.parentTable!]?[parentUuid];
+            // Orphaned by a parent the server did not return: skip it rather
+            // than fail the whole refresh.
+            if (parentId == null) continue;
+            values[table.parentColumn!] = parentId;
+          }
+          final id = await txn.insert(table.name, values);
+          localIds[row['uuid'] as String] = id;
+        }
+        idsByUuid[table.name] = localIds;
+      }
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Trip CRUD
   // ---------------------------------------------------------------------------
 
   Future<Trip> createTrip(Trip trip) async {
-    final db = await database;
-    final id = await db.insert(tableTrip, _stampNew(trip.toMap()..remove('id')));
+    final id = await _insertRow(tableTrip, trip.toMap()..remove('id'));
     return trip.copyWith(id: id);
   }
 
@@ -496,14 +647,11 @@ class DatabaseHelper {
   }
 
   Future<int> updateTrip(Trip trip) async {
-    final db = await database;
-    return db.update(tableTrip, _stampChanged(trip.toMap()),
-        where: 'id = ?', whereArgs: [trip.id]);
+    return _updateRow(tableTrip, trip.toMap(), trip.id!);
   }
 
   Future<int> deleteTrip(int id) async {
-    final db = await database;
-    return db.delete(tableTrip, where: 'id = ?', whereArgs: [id]);
+    return _deleteRow(tableTrip, id);
   }
 
   // ---------------------------------------------------------------------------
@@ -511,8 +659,7 @@ class DatabaseHelper {
   // ---------------------------------------------------------------------------
 
   Future<Stay> createStay(Stay stay) async {
-    final db = await database;
-    final id = await db.insert(tableStay, _stampNew(stay.toMap()..remove('id')));
+    final id = await _insertRow(tableStay, stay.toMap()..remove('id'));
     return stay.copyWith(id: id);
   }
 
@@ -532,14 +679,11 @@ class DatabaseHelper {
   }
 
   Future<int> updateStay(Stay stay) async {
-    final db = await database;
-    return db.update(tableStay, _stampChanged(stay.toMap()),
-        where: 'id = ?', whereArgs: [stay.id]);
+    return _updateRow(tableStay, stay.toMap(), stay.id!);
   }
 
   Future<int> deleteStay(int id) async {
-    final db = await database;
-    return db.delete(tableStay, where: 'id = ?', whereArgs: [id]);
+    return _deleteRow(tableStay, id);
   }
 
   // ---------------------------------------------------------------------------
@@ -547,8 +691,7 @@ class DatabaseHelper {
   // ---------------------------------------------------------------------------
 
   Future<TransportLeg> createTransportLeg(TransportLeg leg) async {
-    final db = await database;
-    final id = await db.insert(tableTransport, _stampNew(leg.toMap()..remove('id')));
+    final id = await _insertRow(tableTransport, leg.toMap()..remove('id'));
     return leg.copyWith(id: id);
   }
 
@@ -568,14 +711,11 @@ class DatabaseHelper {
   }
 
   Future<int> updateTransportLeg(TransportLeg leg) async {
-    final db = await database;
-    return db.update(tableTransport, _stampChanged(leg.toMap()),
-        where: 'id = ?', whereArgs: [leg.id]);
+    return _updateRow(tableTransport, leg.toMap(), leg.id!);
   }
 
   Future<int> deleteTransportLeg(int id) async {
-    final db = await database;
-    return db.delete(tableTransport, where: 'id = ?', whereArgs: [id]);
+    return _deleteRow(tableTransport, id);
   }
 
   // ---------------------------------------------------------------------------
@@ -583,8 +723,7 @@ class DatabaseHelper {
   // ---------------------------------------------------------------------------
 
   Future<Item> createItem(Item item) async {
-    final db = await database;
-    final id = await db.insert(tableItem, _stampNew(item.toMap()..remove('id')));
+    final id = await _insertRow(tableItem, item.toMap()..remove('id'));
     return item.copyWith(id: id);
   }
 
@@ -609,23 +748,17 @@ class DatabaseHelper {
   }
 
   Future<int> updateItem(Item item) async {
-    final db = await database;
-    return db.update(tableItem, _stampChanged(item.toMap()),
-        where: 'id = ?', whereArgs: [item.id]);
+    return _updateRow(tableItem, item.toMap(), item.id!);
   }
 
   Future<int> setItemPacked(int id, bool packed) async {
-    final db = await database;
-    return db.update(tableItem, _stampChanged({'packed': packed ? 1 : 0}),
-        where: 'id = ?', whereArgs: [id]);
+    return _updateRow(tableItem, {'packed': packed ? 1 : 0}, id);
   }
 
   /// Sets how many of [id] to bring. Never drops below one — removing the last
   /// one means deleting the item, not owning zero of it.
   Future<int> setItemQuantity(int id, int quantity) async {
-    final db = await database;
-    return db.update(tableItem, _stampChanged({'quantity': quantity < 1 ? 1 : quantity}),
-        where: 'id = ?', whereArgs: [id]);
+    return _updateRow(tableItem, {'quantity': quantity < 1 ? 1 : quantity}, id);
   }
 
   /// Packs or unpacks every item on a trip, or just one category of it.
@@ -636,6 +769,23 @@ class DatabaseHelper {
     ItemCategory? category,
   }) async {
     final db = await database;
+
+    // Locally this is one statement. The server has no bulk verb, so with a
+    // remote attached each row goes up individually — a packing list is tens
+    // of rows, not thousands, and correctness beats a round trip saved.
+    if (remote != null) {
+      final affected = await db.query(
+        tableItem,
+        columns: ['id'],
+        where: category == null ? 'tripId = ?' : 'tripId = ? AND category = ?',
+        whereArgs: category == null ? [tripId] : [tripId, category.name],
+      );
+      for (final row in affected) {
+        await _updateRow(tableItem, {'packed': packed ? 1 : 0}, row['id'] as int);
+      }
+      return affected.length;
+    }
+
     return db.update(
       tableItem,
       _stampChanged({'packed': packed ? 1 : 0}),
@@ -647,8 +797,7 @@ class DatabaseHelper {
   }
 
   Future<int> deleteItem(int id) async {
-    final db = await database;
-    return db.delete(tableItem, where: 'id = ?', whereArgs: [id]);
+    return _deleteRow(tableItem, id);
   }
 
   // ---------------------------------------------------------------------------
@@ -658,29 +807,24 @@ class DatabaseHelper {
   /// Saves [items] as a reusable list called [name]. Packed state is dropped —
   /// a saved list is what to bring, not how far along you were.
   Future<PackingList> savePackingList(String name, List<Item> items) async {
-    final db = await database;
     final list = PackingList(name: name, createdAt: DateTime.now());
 
-    return db.transaction((txn) async {
-      final listId = await txn.insert(
-        tablePackingList,
-        _stampNew(list.toMap()..remove('id')),
-      );
-      final batch = txn.batch();
-      for (final item in items) {
-        batch.insert(
-          tablePackingListItem,
-          _stampNew({
-            'listId': listId,
-            'name': item.name,
-            'category': item.category.name,
-            'quantity': item.quantity,
-          }),
-        );
-      }
-      await batch.commit(noResult: true);
-      return list.copyWith(id: listId, itemCount: items.length);
-    });
+    // Deliberately not a transaction once a remote is attached: each row has
+    // to reach the server, and a rolled-back local transaction would not undo
+    // what was already accepted there.
+    final listId = await _insertRow(
+      tablePackingList,
+      list.toMap()..remove('id'),
+    );
+    for (final item in items) {
+      await _insertRow(tablePackingListItem, {
+        'listId': listId,
+        'name': item.name,
+        'category': item.category.name,
+        'quantity': item.quantity,
+      });
+    }
+    return list.copyWith(id: listId, itemCount: items.length);
   }
 
   /// Every saved list, newest first, each carrying its entry count.
@@ -700,16 +844,13 @@ class DatabaseHelper {
 
   /// Starts an empty list, to be filled in item by item.
   Future<PackingList> createPackingList(String name) async {
-    final db = await database;
     final list = PackingList(name: name, createdAt: DateTime.now());
-    final id = await db.insert(tablePackingList, _stampNew(list.toMap()..remove('id')));
+    final id = await _insertRow(tablePackingList, list.toMap()..remove('id'));
     return list.copyWith(id: id);
   }
 
   Future<int> renamePackingList(int id, String name) async {
-    final db = await database;
-    return db.update(tablePackingList, _stampChanged({'name': name}),
-        where: 'id = ?', whereArgs: [id]);
+    return _updateRow(tablePackingList, {'name': name}, id);
   }
 
   Future<PackingList?> getPackingList(int id) async {
@@ -726,35 +867,29 @@ class DatabaseHelper {
   }
 
   Future<PackingListEntry> addPackingListEntry(PackingListEntry entry) async {
-    final db = await database;
-    final id = await db.insert(
+    final id = await _insertRow(
       tablePackingListItem,
-      _stampNew(entry.toMap()..remove('id')),
+      entry.toMap()..remove('id'),
     );
     return entry.copyWith(id: id);
   }
 
   Future<int> updatePackingListEntry(PackingListEntry entry) async {
-    final db = await database;
-    return db.update(tablePackingListItem, _stampChanged(entry.toMap()),
-        where: 'id = ?', whereArgs: [entry.id]);
+    return _updateRow(tablePackingListItem, entry.toMap(), entry.id!);
   }
 
   /// Same floor as trip items: one is the minimum, deleting is how you get to
   /// none.
   Future<int> setPackingListEntryQuantity(int id, int quantity) async {
-    final db = await database;
-    return db.update(
+    return _updateRow(
       tablePackingListItem,
-      _stampChanged({'quantity': quantity < 1 ? 1 : quantity}),
-      where: 'id = ?',
-      whereArgs: [id],
+      {'quantity': quantity < 1 ? 1 : quantity},
+      id,
     );
   }
 
   Future<int> deletePackingListEntry(int id) async {
-    final db = await database;
-    return db.delete(tablePackingListItem, where: 'id = ?', whereArgs: [id]);
+    return _deleteRow(tablePackingListItem, id);
   }
 
   Future<List<PackingListEntry>> getPackingListEntries(int listId) async {
@@ -765,8 +900,7 @@ class DatabaseHelper {
   }
 
   Future<int> deletePackingList(int id) async {
-    final db = await database;
-    return db.delete(tablePackingList, where: 'id = ?', whereArgs: [id]);
+    return _deleteRow(tablePackingList, id);
   }
 
   /// Copies a saved list onto a trip as unpacked items, skipping anything the
@@ -783,25 +917,20 @@ class DatabaseHelper {
         .map((i) => '${i.name.toLowerCase()}|${i.category.name}')
         .toSet();
 
-    final db = await database;
     var added = 0;
-    final batch = db.batch();
     for (final entry in entries) {
       final key = '${entry.name.toLowerCase()}|${entry.category.name}';
       if (!seen.add(key)) continue;
-      batch.insert(
-        tableItem,
-        _stampNew({
-          'tripId': tripId,
-          'name': entry.name,
-          'category': entry.category.name,
-          'quantity': entry.quantity,
-          'packed': 0,
-        }),
-      );
+      // Row by row rather than a batch: each has to reach the server too.
+      await _insertRow(tableItem, {
+        'tripId': tripId,
+        'name': entry.name,
+        'category': entry.category.name,
+        'quantity': entry.quantity,
+        'packed': 0,
+      });
       added++;
     }
-    await batch.commit(noResult: true);
     return added;
   }
 
@@ -810,8 +939,7 @@ class DatabaseHelper {
   // ---------------------------------------------------------------------------
 
   Future<Document> createDocument(Document document) async {
-    final db = await database;
-    final id = await db.insert(tableDocument, _stampNew(document.toMap()..remove('id')));
+    final id = await _insertRow(tableDocument, document.toMap()..remove('id'));
     return document.copyWith(id: id);
   }
 
@@ -823,13 +951,10 @@ class DatabaseHelper {
   }
 
   Future<int> updateDocument(Document document) async {
-    final db = await database;
-    return db.update(tableDocument, _stampChanged(document.toMap()),
-        where: 'id = ?', whereArgs: [document.id]);
+    return _updateRow(tableDocument, document.toMap(), document.id!);
   }
 
   Future<int> deleteDocument(int id) async {
-    final db = await database;
-    return db.delete(tableDocument, where: 'id = ?', whereArgs: [id]);
+    return _deleteRow(tableDocument, id);
   }
 }

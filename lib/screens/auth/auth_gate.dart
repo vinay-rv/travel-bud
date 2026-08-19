@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../../auth/auth_service.dart';
 import '../../data/database_helper.dart';
-import '../../sync/sync_engine.dart';
 import '../../theme/app_theme.dart';
 import '../trip_list_screen.dart';
 import 'sign_in_screen.dart';
@@ -105,14 +104,17 @@ class _AuthGateState extends State<AuthGate> {
 /// thing to understand than a dependency.
 typedef SignedOutCallback = void Function();
 
-/// Signs out and returns to the entry screen, clearing the device's claim on
-/// the account's data so a different account can sign in cleanly afterwards.
+/// Signs out and returns to the entry screen.
+///
+/// The cache is emptied on the way out: it holds one account's trips, and
+/// leaving them on the device for whoever signs in next would be both confusing
+/// and a small privacy leak.
 Future<void> signOutAndReturn({
   required AuthService auth,
-  required SyncEngine sync,
+  required DatabaseHelper db,
   required SignedOutCallback onSignedOut,
 }) async {
   await auth.signOut();
-  await sync.forgetAccount();
+  await db.clearCache();
   onSignedOut();
 }

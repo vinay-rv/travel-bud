@@ -2,26 +2,25 @@ import 'package:flutter/material.dart';
 
 import '../auth/auth_service.dart';
 import '../auth/session.dart';
-import '../sync/sync_engine.dart';
+import '../data/database_helper.dart';
 import '../theme/app_theme.dart';
-import '../utils/date_format.dart';
 import '../widgets/ui.dart';
 import 'auth/auth_gate.dart';
 
-/// Who you are signed in as, and how the syncing is going.
+/// Your account.
 ///
-/// Sync itself has no controls: it is not a feature the user turns on, it is
-/// how an account works. All that is left to show is whether it is up to date,
-/// a way to force it, and the way out.
+/// There is nothing here about syncing, because there is no longer anything to
+/// decide: the server holds the data and the app writes straight to it. What is
+/// left is who you are and how to leave.
 class AccountScreen extends StatefulWidget {
-  /// Injectable for tests; default to the app-wide instances.
+  /// Injectable for tests; the app-wide instances otherwise.
   final AuthService? auth;
-  final SyncEngine? engine;
+  final DatabaseHelper? db;
 
   /// Sends the app back to sign-in once the session ends.
   final VoidCallback? onSignedOut;
 
-  const AccountScreen({super.key, this.auth, this.engine, this.onSignedOut});
+  const AccountScreen({super.key, this.auth, this.db, this.onSignedOut});
 
   @override
   State<AccountScreen> createState() => _AccountScreenState();
@@ -29,93 +28,17 @@ class AccountScreen extends StatefulWidget {
 
 class _AccountScreenState extends State<AccountScreen> {
   AuthService get _auth => widget.auth ?? Auth.instance;
-  SyncEngine get _engine => widget.engine ?? Sync.instance;
+  DatabaseHelper get _db => widget.db ?? DatabaseHelper.instance;
 
   bool _busy = false;
-  DateTime? _lastSyncedAt;
-  String? _message;
-
-  @override
-  void initState() {
-    super.initState();
-    _refresh();
-  }
-
-  Future<void> _refresh() async {
-    final lastSyncedAt = await _engine.lastSyncedAt();
-    if (!mounted) return;
-    setState(() => _lastSyncedAt = lastSyncedAt);
-  }
-
-  Future<void> _syncNow() async {
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-    final outcome = await _engine.sync();
-    if (!mounted) return;
-    await _refresh();
-    if (!mounted) return;
-
-    setState(() {
-      _busy = false;
-      _message = switch (outcome) {
-        SyncOutcome.unavailable =>
-          'No connection. Your trips are safe on this phone and will sync '
-              'once you are back online.',
-        SyncOutcome.noAccount => 'Signed out. Sign in again to sync.',
-        _ => null,
-      };
-    });
-
-    if (outcome == SyncOutcome.accountMismatch) await _askAboutMismatch();
-  }
-
-  /// This phone's trips belong to one account and a different one has signed
-  /// in. Merging automatically would either duplicate everything or throw
-  /// something away, so it asks.
-  Future<void> _askAboutMismatch() async {
-    final resolution = await showDialog<MismatchResolution>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Two sets of trips'),
-        content: const Text(
-          'This phone has trips from a different account. Which would you '
-          'like to keep?',
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () =>
-                Navigator.of(context).pop(MismatchResolution.useTheAccount),
-            child: const Text('Use the account'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(0, 46)),
-            onPressed: () =>
-                Navigator.of(context).pop(MismatchResolution.keepThisDevice),
-            child: const Text('Keep this phone'),
-          ),
-        ],
-      ),
-    );
-    if (resolution == null) return;
-
-    await _engine.resolveAccountMismatch(resolution);
-    await _syncNow();
-  }
 
   Future<void> _confirmSignOut() async {
     final confirmed = await confirmDestructive(
       context,
       title: 'Sign out?',
       message:
-          'You will need to sign in again to use Packmate. Anything not yet '
-          'synced will upload the next time you sign in on this phone.',
+          'Your trips stay in your account. You will need to sign in again to '
+          'see them on this phone.',
       confirmLabel: 'Sign out',
     );
     if (!confirmed) return;
@@ -123,7 +46,7 @@ class _AccountScreenState extends State<AccountScreen> {
     setState(() => _busy = true);
     await signOutAndReturn(
       auth: _auth,
-      sync: _engine,
+      db: _db,
       onSignedOut: () {
         widget.onSignedOut?.call();
         // Back to the root, where the gate now shows sign-in.
@@ -151,24 +74,17 @@ class _AccountScreenState extends State<AccountScreen> {
               const _Header(),
               const SizedBox(height: AppSpacing.lg),
               if (session != null) _IdentityCard(session: session),
-              const SizedBox(height: AppSpacing.md),
-              _SyncCard(lastSyncedAt: _lastSyncedAt, busy: _busy),
-              const SizedBox(height: AppSpacing.md),
-              if (_message != null) ...[
-                _MessageCard(message: _message!),
-                const SizedBox(height: AppSpacing.md),
-              ],
-              AppSecondaryButton(
-                label: 'Sync now',
-                icon: Icons.sync_rounded,
-                onPressed: _busy ? () {} : _syncNow,
-              ),
-              const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.xl),
               AppSecondaryButton(
                 label: 'Sign out',
                 icon: Icons.logout_rounded,
                 accent: AppColors.rose,
                 onPressed: _busy ? () {} : _confirmSignOut,
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              const FormHint(
+                'Your trips live in your account, so they are on every device '
+                'you sign in to and survive losing this phone.',
               ),
             ],
           ),
@@ -194,20 +110,10 @@ class _Header extends StatelessWidget {
         ),
         const SizedBox(width: AppSpacing.xs),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Account', style: theme.textTheme.headlineSmall),
-              const SizedBox(height: 2),
-              Text('Your trips, on every device', style: theme.textTheme.bodySmall),
-            ],
-          ),
+          child: Text('Account', style: theme.textTheme.headlineSmall),
         ),
         const SizedBox(width: AppSpacing.md),
-        const AppIconTile(
-          icon: Icons.person_rounded,
-          color: AppColors.primary,
-        ),
+        const AppIconTile(icon: Icons.person_rounded, color: AppColors.primary),
       ],
     );
   }
@@ -218,29 +124,57 @@ class _IdentityCard extends StatelessWidget {
 
   const _IdentityCard({required this.session});
 
+  /// First letter of the name, or of the email when there is no name.
+  String get _initial {
+    final name = session.displayName;
+    final source = (name != null && name.isNotEmpty) ? name : session.email;
+    return source.characters.first.toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final name = session.displayName;
 
     return AppCard(
+      padding: const EdgeInsets.all(AppSpacing.xl),
       child: Row(
         children: [
-          const AppIconTile(
-            icon: Icons.account_circle_outlined,
-            color: AppColors.primary,
+          Container(
+            width: 56,
+            height: 56,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.primary.withValues(alpha: 0.16),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.3),
+              ),
+            ),
+            child: Text(
+              _initial,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
           ),
-          const SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.lg),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   name == null || name.isEmpty ? 'Signed in' : name,
-                  style: Theme.of(context).textTheme.titleMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   session.email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ],
@@ -252,78 +186,3 @@ class _IdentityCard extends StatelessWidget {
   }
 }
 
-class _SyncCard extends StatelessWidget {
-  final DateTime? lastSyncedAt;
-  final bool busy;
-
-  const _SyncCard({required this.lastSyncedAt, required this.busy});
-
-  String get _detail {
-    if (busy) return 'Syncing…';
-    final at = lastSyncedAt;
-    if (at == null) return 'Waiting for the first sync.';
-    return 'Last synced ${_relative(at)}.';
-  }
-
-  static String _relative(DateTime at) {
-    final elapsed = DateTime.now().difference(at);
-    if (elapsed.inMinutes < 1) return 'just now';
-    if (elapsed.inMinutes < 60) return '${elapsed.inMinutes} min ago';
-    if (elapsed.inHours < 24) {
-      return '${elapsed.inHours} hour${elapsed.inHours == 1 ? '' : 's'} ago';
-    }
-    return 'on ${formatDate(at)}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AppIconTile(
-            icon: busy ? Icons.sync_rounded : Icons.cloud_done_outlined,
-            color: AppColors.mint,
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Synced to your account',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 4),
-                Text(_detail, style: Theme.of(context).textTheme.bodyMedium),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MessageCard extends StatelessWidget {
-  final String message;
-
-  const _MessageCard({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      borderColor: AppColors.amber.withValues(alpha: 0.35),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.amber),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Text(message, style: Theme.of(context).textTheme.bodyMedium),
-          ),
-        ],
-      ),
-    );
-  }
-}

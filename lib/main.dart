@@ -6,16 +6,14 @@ import 'package:flutter/material.dart';
 import 'auth/api_client.dart';
 import 'auth/auth_service.dart';
 import 'auth/session.dart';
+import 'config/api_config.dart';
 import 'data/database_helper.dart';
+import 'data/remote_store.dart';
 import 'models/trip.dart';
 import 'screens/auth/auth_gate.dart';
 import 'screens/trip_detail_screen.dart';
 import 'services/notification_platform.dart';
 import 'services/reminder_scheduler.dart';
-import 'sync/api_remote.dart';
-import 'sync/sync_config.dart';
-import 'sync/sync_engine.dart';
-import 'sync/sync_trigger.dart';
 import 'theme/app_theme.dart';
 
 /// Lets a notification tap push a route from outside the widget tree.
@@ -24,15 +22,15 @@ final navigatorKey = GlobalKey<NavigatorState>();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Accounts and sync. No network here: the session is read from the device, so
+  // Accounts and data. No network here: the session is read from the device, so
   // a signed-in user opens straight into their trips even with no connection.
   final api = ApiClient(
     baseUrl: Uri.parse(apiBaseUrl),
     store: SecureSessionStore(),
   );
   Auth.install(AuthService(api));
-  Sync.instance = SyncEngine(db: DatabaseHelper.instance, remote: ApiRemote(api));
-  SyncTrigger(db: DatabaseHelper.instance, engine: () => Sync.instance).start();
+  // The server owns the data; the local database is a cache of it.
+  DatabaseHelper.instance.remote = ApiRemoteStore(api);
 
   // Notifications only exist on mobile here; elsewhere the default no-op
   // scheduler stays in place.
@@ -42,8 +40,8 @@ Future<void> main() async {
     Reminders.instance = ReminderScheduler(platform: platform);
     NotificationPlatform.onSelect = _openTripFromPayload;
 
-    // Rebuild the scheduled set from the database on every launch, so it
-    // survives reboots, timezone changes, and edits made while closed.
+    // Rebuild the scheduled set from the cache on every launch, so it survives
+    // reboots, timezone changes, and edits made while closed.
     unawaited(Reminders.instance.syncAll(DatabaseHelper.instance));
 
     final launchPayload = await platform.launchPayload();
@@ -88,11 +86,8 @@ class PackmateApp extends StatelessWidget {
       theme: buildAppTheme(),
       home: AuthGate(
         auth: Auth.instance,
-        // Signing in is the one moment worth waiting on a sync: it is what
-        // brings an existing account's trips onto a new phone.
-        onSignedIn: () async {
-          await Sync.instance.sync();
-        },
+        // Signing in is what brings an account's trips onto a new phone.
+        onSignedIn: () => DatabaseHelper.instance.refreshFromServer(),
       ),
     );
   }

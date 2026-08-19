@@ -252,6 +252,44 @@ void main() {
     });
   });
 
+  group('When the keystore misbehaves', () {
+    // A device with a broken keystore, or a build where the plugin's native
+    // side is missing, throws on every read and write. Signing in must still
+    // work: the alternative is a sign-in button that fails forever with no
+    // explanation, which is exactly what a MissingPluginException produced.
+    test('signing in succeeds even if the session cannot be saved', () async {
+      final client = ApiClient(
+        baseUrl: Uri.parse('https://api.test'),
+        store: ThrowingSessionStore(),
+        httpClient: api.client,
+      );
+      final service = AuthService(client);
+      api.reply('/auth/signin', sessionBody());
+
+      final session = await service.signIn(
+        email: 'traveller@example.com',
+        password: 'correct-horse-battery',
+      );
+
+      expect(session.email, 'traveller@example.com');
+      // Signed in for this run; asked again next launch, which beats not
+      // being able to sign in at all.
+      expect(service.isSignedIn, isTrue);
+    });
+
+    test('launching succeeds even if the stored session cannot be read',
+        () async {
+      final service = AuthService(ApiClient(
+        baseUrl: Uri.parse('https://api.test'),
+        store: ThrowingSessionStore(),
+        httpClient: api.client,
+      ));
+
+      expect(await service.restore(), isNull);
+      expect(service.isSignedIn, isFalse);
+    });
+  });
+
   group('Restoring on launch', () {
     test('reads the stored session without touching the network', () async {
       await store.write(const Session(
@@ -273,4 +311,20 @@ void main() {
       expect(auth.isSignedIn, isFalse);
     });
   });
+}
+
+/// Fails every operation, like a keystore whose plugin is missing from the
+/// build — which is exactly what a MissingPluginException looks like.
+class ThrowingSessionStore implements SessionStore {
+  @override
+  Future<Session?> read() async =>
+      throw Exception('MissingPluginException(no implementation found)');
+
+  @override
+  Future<void> write(Session session) async =>
+      throw Exception('MissingPluginException(no implementation found)');
+
+  @override
+  Future<void> clear() async =>
+      throw Exception('MissingPluginException(no implementation found)');
 }

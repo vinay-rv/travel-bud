@@ -77,10 +77,13 @@ class _TripListScreenState extends State<TripListScreen> {
     );
   }
 
-  Future<void> _openBackup() async {
+  Future<void> _openAccount() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => AccountScreen(onSignedOut: widget.onSignedOut),
+        builder: (_) => AccountScreen(
+          db: widget.db,
+          onSignedOut: widget.onSignedOut,
+        ),
       ),
     );
   }
@@ -136,7 +139,7 @@ class _TripListScreenState extends State<TripListScreen> {
                       child: _Greeting(
                         trips: trips,
                         onOpenSavedLists: _openSavedLists,
-                        onOpenBackup: _openBackup,
+                        onOpenAccount: _openAccount,
                       ),
                     ),
                     if (snapshot.hasError)
@@ -206,12 +209,12 @@ class _TripListScreenState extends State<TripListScreen> {
 class _Greeting extends StatelessWidget {
   final List<Trip> trips;
   final VoidCallback onOpenSavedLists;
-  final VoidCallback onOpenBackup;
+  final VoidCallback onOpenAccount;
 
   const _Greeting({
     required this.trips,
     required this.onOpenSavedLists,
-    required this.onOpenBackup,
+    required this.onOpenAccount,
   });
 
   /// The soonest trip that hasn't finished yet, if any.
@@ -272,10 +275,10 @@ class _Greeting extends StatelessWidget {
                 onPressed: onOpenSavedLists,
               ),
               IconButton(
-                icon: const Icon(Icons.cloud_outlined),
+                icon: const Icon(Icons.person_outline_rounded),
                 color: AppColors.textMuted,
-                tooltip: 'Backup',
-                onPressed: onOpenBackup,
+                tooltip: 'Account',
+                onPressed: onOpenAccount,
               ),
             ],
           ),
