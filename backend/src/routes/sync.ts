@@ -79,6 +79,20 @@ const tables = {
       packed: z.coerce.boolean().default(false),
     }),
   },
+  expenses: {
+    delegate: () => prisma.expense,
+    parent: { field: 'tripUuid', delegate: () => prisma.trip },
+    schema: z.object({
+      uuid,
+      tripUuid: uuid,
+      name: z.string().min(1).max(200),
+      // Minor units, so money stays an integer. Bounded because a signed 32-bit
+      // column overflows above ~21 million major units, and a typo should be a
+      // validation error rather than a database one.
+      amountMinor: z.coerce.number().int().min(0).max(2_000_000_000),
+      spentAt: epochMs,
+    }),
+  },
   packing_lists: {
     delegate: () => prisma.packingList,
     parent: null,

@@ -44,6 +44,7 @@ model User {
   packingLists       PackingList[]
   packingListItems   PackingListItem[]
   documents          Document[]
+  expenses           Expense[]
 
   @@map("users")
 }
@@ -99,6 +100,7 @@ model Trip {
   transportLegs TransportLeg[]
   items         Item[]
   documents     Document[]
+  expenses      Expense[]
 
   @@index([userId, updatedAt])
   @@map("trips")
@@ -193,6 +195,33 @@ model PackingListItem {
   @@index([userId, updatedAt])
   @@index([listUuid])
   @@map("packing_list_items")
+}
+
+/// Something spent on a trip.
+///
+/// `amountMinor` is an integer of the currency's smallest unit — 1250 for
+/// 12.50. Money is never a float: a tenth of a unit cannot be represented in
+/// binary, so totals drift by a penny at a time and eventually someone notices.
+///
+/// No currency field yet. Every amount on a trip is assumed to be in the same
+/// one, which is wrong for a trip that crosses a border and is the obvious next
+/// thing to add.
+model Expense {
+  uuid        String  @id @db.Uuid
+  userId      String  @db.Uuid
+  tripUuid    String  @db.Uuid
+  name        String
+  amountMinor Int
+  spentAt     BigInt
+  updatedAt   BigInt  @default(0)
+  deletedAt   BigInt?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip @relation(fields: [tripUuid], references: [uuid], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@index([tripUuid])
+  @@map("expenses")
 }
 
 /// Present so the schema is complete, but not synced yet: the app's `photoPath`

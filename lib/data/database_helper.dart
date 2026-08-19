@@ -9,6 +9,7 @@ import '../models/transport_leg.dart';
 import '../models/item.dart';
 import '../models/document.dart';
 import '../models/item_category.dart';
+import '../models/expense.dart';
 import '../models/packing_list.dart';
 import 'remote_store.dart';
 
@@ -25,7 +26,7 @@ import 'remote_store.dart';
 /// [DatabaseHelper.forTesting] with an in-memory path.
 class DatabaseHelper {
   static const _dbName = 'trip_inventory.db';
-  static const _dbVersion = 4;
+  static const _dbVersion = 5;
 
   static const tableTrip = 'trips';
   static const tableStay = 'stays';
@@ -34,6 +35,7 @@ class DatabaseHelper {
   static const tableDocument = 'documents';
   static const tablePackingList = 'packing_lists';
   static const tablePackingListItem = 'packing_list_items';
+  static const tableExpense = 'expenses';
 
   /// Bookkeeping for the sync engine. These never hold user-visible content.
   static const tableSyncState = 'sync_state';
@@ -50,6 +52,7 @@ class DatabaseHelper {
     tableDocument,
     tablePackingList,
     tablePackingListItem,
+    tableExpense,
   ];
 
   DatabaseHelper._(this._explicitPath);
@@ -130,6 +133,9 @@ class DatabaseHelper {
         !tables.contains(tablePackingListItem)) {
       await _createPackingListTables(db);
     }
+    if (!tables.contains(tableExpense)) {
+      await _createExpenseTable(db);
+    }
 
     // The v4 sync shape. Without this, a file stamped v4 but never actually
     // migrated fails at runtime on the first write with "no such column: uuid".
@@ -200,11 +206,28 @@ class DatabaseHelper {
     // are derived from stay ids (`reminder_scheduler.dart`), so a shifted id
     // would orphan every scheduled reminder.
     if (oldVersion < 4) {
-      for (final table in syncedTables) {
+      // Frozen: the tables that existed at v4. Using the live `syncedTables`
+      // would make this step change every time a new table is added, and it
+      // would try to alter one that does not exist yet.
+      const v4Tables = [
+        tableTrip,
+        tableStay,
+        tableTransport,
+        tableItem,
+        tableDocument,
+        tablePackingList,
+        tablePackingListItem,
+      ];
+      for (final table in v4Tables) {
         await _addSyncColumns(db, table);
       }
       await _createSyncTables(db);
       await _createTombstoneTriggers(db);
+    }
+
+    // v5 adds trip expenses.
+    if (oldVersion < 5) {
+      await _upgradeToV5(db);
     }
   }
 
@@ -223,9 +246,9 @@ class DatabaseHelper {
 
   /// Adds the sync columns to [table] and backfills them, if they're absent.
   ///
-  /// Shared by the v4 migration and [_ensureSchema]; safe only because v4 is
-  /// the newest step. **The moment a v5 exists, freeze a copy of this inside
-  /// the v4 block** — migrations must not track the latest schema.
+  /// Shared by the newest migration step and [_ensureSchema]. Older steps pass
+  /// their own frozen list of tables, so this tracking the latest schema cannot
+  /// change what they produce.
   ///
   /// `dirty` defaults to 1 so every pre-existing row is queued for the first
   /// push: that is what makes "claim my existing data" free.
@@ -336,6 +359,13 @@ class DatabaseHelper {
     }
   }
 
+  /// v5 adds trip expenses.
+  Future<void> _upgradeToV5(Database db) async {
+    await _createExpenseTable(db);
+    await _addSyncColumns(db, tableExpense);
+    await _createTombstoneTriggers(db);
+  }
+
   Future<void> _createSchema(Database db, int version) async {
     await db.execute('''
       CREATE TABLE $tableTrip (
@@ -371,6 +401,7 @@ class DatabaseHelper {
 
     await _createItemTable(db);
     await _createPackingListTables(db);
+    await _createExpenseTable(db);
 
     await db.execute('''
       CREATE TABLE $tableDocument (
@@ -404,6 +435,23 @@ class DatabaseHelper {
         category TEXT NOT NULL DEFAULT 'other',
         quantity INTEGER NOT NULL DEFAULT 1,
         packed INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (tripId) REFERENCES $tableTrip (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  /// Money spent on a trip.
+  ///
+  /// `amountMinor` is an integer of the currency's smallest unit. Storing money
+  /// as a real would let totals drift by a penny at a time.
+  Future<void> _createExpenseTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableExpense (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tripId INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        amountMinor INTEGER NOT NULL,
+        spentAt INTEGER NOT NULL,
         FOREIGN KEY (tripId) REFERENCES $tableTrip (id) ON DELETE CASCADE
       )
     ''');
@@ -932,6 +980,43 @@ class DatabaseHelper {
       added++;
     }
     return added;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Expense CRUD
+  // ---------------------------------------------------------------------------
+
+  Future<Expense> createExpense(Expense expense) async {
+    final id = await _insertRow(tableExpense, expense.toMap()..remove('id'));
+    return expense.copyWith(id: id);
+  }
+
+  /// A trip's spending, most recent first — the order you want when checking
+  /// what you just paid for.
+  Future<List<Expense>> getExpensesForTrip(int tripId) async {
+    final db = await database;
+    final maps = await db.query(tableExpense,
+        where: 'tripId = ?', whereArgs: [tripId], orderBy: 'spentAt DESC, id DESC');
+    return maps.map(Expense.fromMap).toList();
+  }
+
+  /// What the trip has cost so far, in minor units.
+  Future<int> getExpenseTotalForTrip(int tripId) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COALESCE(SUM(amountMinor), 0) AS total FROM $tableExpense '
+      'WHERE tripId = ?',
+      [tripId],
+    );
+    return (result.first['total'] as num).toInt();
+  }
+
+  Future<int> updateExpense(Expense expense) async {
+    return _updateRow(tableExpense, expense.toMap(), expense.id!);
+  }
+
+  Future<int> deleteExpense(int id) async {
+    return _deleteRow(tableExpense, id);
   }
 
   // ---------------------------------------------------------------------------

@@ -11,8 +11,11 @@ import '../services/reminder_scheduler.dart';
 import '../theme/app_theme.dart';
 import '../utils/date_format.dart';
 import '../utils/trip_status.dart';
+import '../models/expense.dart';
 import '../widgets/checklist.dart';
+import '../widgets/expenses_tab.dart';
 import '../widgets/ui.dart';
+import 'expense_edit_screen.dart';
 import 'item_edit_screen.dart';
 import 'stay_edit_screen.dart';
 import 'transport_edit_screen.dart';
@@ -42,7 +45,13 @@ class TripDetailScreen extends StatefulWidget {
 
 class _TripDetailScreenState extends State<TripDetailScreen>
     with SingleTickerProviderStateMixin {
-  static const _tabs = ['Stays', 'Transport', 'Items', 'Documents'];
+  static const _tabs = [
+    'Stays',
+    'Transport',
+    'Items',
+    'Expenses',
+    'Documents',
+  ];
 
   late final TabController _tabController;
   late Trip _trip;
@@ -122,6 +131,11 @@ class _TripDetailScreenState extends State<TripDetailScreen>
                       tripName: _trip.name,
                       db: widget.db,
                     ),
+                    ExpensesTab(
+                      key: _expensesKey,
+                      tripId: _trip.id!,
+                      db: widget.db,
+                    ),
                     const AppEmptyState(
                       icon: Icons.folder_copy_outlined,
                       title: 'Document vault',
@@ -163,6 +177,13 @@ class _TripDetailScreenState extends State<TripDetailScreen>
           icon: Icons.add_rounded,
           label: 'Add Item',
         );
+      case 3:
+        return AppFab(
+          heroTag: 'add-expense',
+          onPressed: _addExpense,
+          icon: Icons.add_rounded,
+          label: 'Add Expense',
+        );
       default:
         return null;
     }
@@ -195,10 +216,20 @@ class _TripDetailScreenState extends State<TripDetailScreen>
     if (created != null) _itemsKey.currentState?.reload();
   }
 
+  Future<void> _addExpense() async {
+    final created = await Navigator.of(context).push<Expense>(
+      MaterialPageRoute(
+        builder: (_) => ExpenseEditScreen(tripId: _trip.id!, db: widget.db),
+      ),
+    );
+    if (created != null) _expensesKey.currentState?.reload();
+  }
+
   // Keys let the FAB tell the relevant tab to reload after an add.
   final _staysKey = GlobalKey<_StaysTabState>();
   final _transportKey = GlobalKey<_TransportTabState>();
   final _itemsKey = GlobalKey<ChecklistViewState>();
+  final _expensesKey = GlobalKey<ExpensesTabState>();
 }
 
 /// Hero header: navigation, trip identity, and at-a-glance trip facts.
@@ -315,7 +346,7 @@ class _DetailHeader extends StatelessWidget {
 
 /// Segmented control that keeps its edges aligned with the content cards
 /// instead of running flush against the screen.
-class _TabSelector extends StatelessWidget {
+class _TabSelector extends StatefulWidget {
   final TabController controller;
   final List<String> tabs;
   final Color accent;
@@ -327,65 +358,161 @@ class _TabSelector extends StatelessWidget {
   });
 
   @override
+  State<_TabSelector> createState() => _TabSelectorState();
+}
+
+class _TabSelectorState extends State<_TabSelector> {
+  final _scroll = ScrollController();
+
+  TabController get controller => widget.controller;
+  List<String> get tabs => widget.tabs;
+  Color get accent => widget.accent;
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Brings the selected tab into view when the strip is scrollable.
+  ///
+  /// Without this, selecting a tab off the right-hand edge — including opening
+  /// the screen on one, as a checkout reminder does — leaves it invisible and
+  /// the strip looking stuck on the first few.
+  void _revealSelected(List<double> widths, double viewport) {
+    if (!_scroll.hasClients) return;
+
+    var start = 0.0;
+    for (var i = 0; i < controller.index; i++) {
+      start += widths[i];
+    }
+    final end = start + widths[controller.index];
+    final offset = _scroll.offset;
+
+    double? target;
+    if (start < offset) {
+      target = start;
+    } else if (end > offset + viewport) {
+      target = end - viewport;
+    }
+    if (target == null) return;
+
+    final clamped = target.clamp(0.0, _scroll.position.maxScrollExtent);
+    _scroll.animateTo(
+      clamped,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  static const _labelStyle = TextStyle(fontSize: 13.5, letterSpacing: -0.2);
+  static const _tabPadding = 12.0;
+
+  /// How wide [label] needs to be, laid out for real.
+  ///
+  /// Measured rather than guessed because the answer depends on the font and
+  /// the reader's text scale, and being wrong means either a squashed label or
+  /// a scroll bar nobody needed.
+  double _widthOf(BuildContext context, String label) {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: label,
+        // The selected tab is bolder, so measure the widest case for every tab
+        // — otherwise the strip reflows as the selection moves.
+        style: _labelStyle.copyWith(fontWeight: FontWeight.w700),
+      ),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    return painter.width + _tabPadding * 2;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        return Container(
-          height: 46,
-          padding: const EdgeInsets.all(4),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            children: List.generate(tabs.length, (index) {
-              final selected = controller.index == index;
-              return Expanded(
-                child: Semantics(
-                  selected: selected,
-                  button: true,
-                  label: tabs[index],
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                    onTap: () => controller.animateTo(index),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      curve: Curves.easeOutCubic,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: selected
-                            ? accent.withValues(alpha: 0.16)
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(AppRadius.sm),
-                        border: Border.all(
-                          color: selected
-                              ? accent.withValues(alpha: 0.35)
-                              : Colors.transparent,
-                        ),
-                      ),
-                      child: Text(
-                        tabs[index],
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 13.5,
-                          letterSpacing: -0.2,
-                          color: selected ? accent : AppColors.textMuted,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final widths = [
+              for (final tab in tabs) _widthOf(context, tab),
+            ];
+            final needed = widths.fold<double>(0, (sum, w) => sum + w);
+            // 8 for the container's own padding.
+            final fits = needed <= constraints.maxWidth - 8;
+
+            final children = [
+              for (var index = 0; index < tabs.length; index++)
+                if (fits)
+                  Expanded(child: _tab(index))
+                else
+                  SizedBox(width: widths[index], child: _tab(index)),
+            ];
+
+            if (!fits) {
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => _revealSelected(widths, constraints.maxWidth - 8),
               );
-            }),
-          ),
+            }
+
+            return Container(
+              height: 46,
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: AppColors.border),
+              ),
+              // Five labels do not fit a 360dp phone, and squeezing them into
+              // ellipsised stubs makes the tabs unreadable. Scroll instead, but
+              // only when the labels genuinely do not fit.
+              child: fits
+                  ? Row(children: children)
+                  : SingleChildScrollView(
+                      controller: _scroll,
+                      scrollDirection: Axis.horizontal,
+                      child: Row(children: children),
+                    ),
+            );
+          },
         );
       },
+    );
+  }
+
+  Widget _tab(int index) {
+    final selected = controller.index == index;
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: tabs[index],
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        onTap: () => controller.animateTo(index),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? accent.withValues(alpha: 0.16) : Colors.transparent,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            border: Border.all(
+              color: selected
+                  ? accent.withValues(alpha: 0.35)
+                  : Colors.transparent,
+            ),
+          ),
+          child: Text(
+            tabs[index],
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: _labelStyle.copyWith(
+              color: selected ? accent : AppColors.textMuted,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -38,6 +38,8 @@ const remoteTables = <RemoteTable>[
       parentColumn: 'tripId', parentTable: 'trips', parentWireColumn: 'tripUuid'),
   RemoteTable('items',
       parentColumn: 'tripId', parentTable: 'trips', parentWireColumn: 'tripUuid'),
+  RemoteTable('expenses',
+      parentColumn: 'tripId', parentTable: 'trips', parentWireColumn: 'tripUuid'),
   RemoteTable('packing_lists'),
   RemoteTable('packing_list_items',
       parentColumn: 'listId',
