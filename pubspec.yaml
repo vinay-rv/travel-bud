@@ -42,7 +42,11 @@ dependencies:
   flutter_timezone: ^5.1.0
   uuid: ^4.6.0
   http: ^1.6.0
-  flutter_secure_storage: ^11.0.0
+  # Pinned below 11: that release compiles against Android SDK 37, which the
+  # SDK only publishes as the minor-versioned "android-37.0" platform, and
+  # Gradle resolves compileSdk 37 to a plain "android-37" that does not exist.
+  # 10.x compiles against 36 and has the identical read/write/delete API.
+  flutter_secure_storage: ^10.3.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
