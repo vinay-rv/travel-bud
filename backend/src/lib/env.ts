@@ -6,6 +6,12 @@
  */
 import { z } from 'zod';
 
+import { loadEnvFile } from './load-env.js';
+
+// Before anything reads process.env. Real environment variables win, so this is
+// a convenience for local development and a no-op in production.
+loadEnvFile(new URL('../../.env', import.meta.url));
+
 const schema = z.object({
   DATABASE_URL: z.string().min(1),
   // 32 bytes minimum. A short secret on a JWT signing key is the kind of thing

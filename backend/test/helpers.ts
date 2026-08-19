@@ -1,12 +1,9 @@
-import { readFileSync } from 'node:fs';
+import { loadEnvFile } from '../src/lib/load-env.js';
 
 // Load .env.test before anything reads process.env — importing the app pulls in
-// env.ts, which validates and freezes configuration at import time.
-for (const line of readFileSync(new URL('../.env.test', import.meta.url), 'utf8').split('\n')) {
-  const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-  if (!match) continue;
-  process.env[match[1]] = match[2].replace(/^["']|["']$/g, '');
-}
+// env.ts, which validates and freezes configuration at import time. Loading it
+// first also means env.ts's own .env load cannot override the test database.
+loadEnvFile(new URL('../.env.test', import.meta.url));
 process.env.ACCESS_TOKEN_SECRET ??= 'test-secret-that-is-long-enough-1234567890';
 
 const { buildApp } = await import('../src/app.js');
