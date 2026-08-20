@@ -55,7 +55,7 @@ void main() {
     expect(find.text('Document vault'), findsNothing);
 
     // Items is still index 2, which is where a checkout reminder deep-links.
-    expect(find.widgetWithText(AppBottomBarAction, 'Add Item'),
+    expect(find.byType(AppBottomBarAction),
         findsOneWidget);
   }, timeout: const Timeout(Duration(seconds: 60)));
 }

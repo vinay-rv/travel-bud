@@ -121,7 +121,7 @@ class _TripListScreenState extends State<TripListScreen> {
         // to take you there.
         onHome: null,
         onAction: _createTrip,
-        actionLabel: 'Plan a trip',
+        actionLabel: 'Trip',
         onAccount: _openAccount,
       ),
       body: AppBackground(

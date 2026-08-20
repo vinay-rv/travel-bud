@@ -140,6 +140,9 @@ void main() {
     await groupByBag(tester);
 
     expect(find.text('Cabin bag'), findsOneWidget);
+    // The catch-all section is last, so it starts below the fold.
+    await tester.drag(find.byType(ListView).last, const Offset(0, -200));
+    await settle(tester);
     expect(find.text('No bag'), findsOneWidget);
   }, timeout: _timeout);
 
@@ -152,6 +155,10 @@ void main() {
     // Nothing is in a bag, so the whole list sits under "No bag".
     expect(find.text('No bag'), findsOneWidget);
 
+    // The "New bag" card is the last thing in the list, so it starts behind
+    // the bottom bar.
+    await tester.ensureVisible(find.text('New bag'));
+    await settle(tester);
     await tester.tap(find.text('New bag'));
     await settle(tester);
     await tester.enterText(find.byType(TextField), 'Cabin bag');
@@ -162,9 +169,9 @@ void main() {
     expect(find.text('Cabin bag'), findsOneWidget);
     expect(find.text('Nothing in here yet'), findsOneWidget);
 
-    // Scroll the row clear of the floating "Add Item" button before reaching
-    // for its menu, then use the last menu on screen — the new bag's section
-    // header has one too.
+    // Scroll the row clear of the bottom bar before reaching for its menu,
+    // then use the last menu on screen — the new bag's section header has one
+    // too.
     await tester.drag(find.byType(ListView).last, const Offset(0, -160));
     await settle(tester);
     await tester.tap(find.byIcon(Icons.more_vert).last);
@@ -261,7 +268,7 @@ void main() {
     await seedBag(tester, 'Cabin bag');
     await openItemsTab(tester);
 
-    await tester.tap(find.widgetWithText(AppBottomBarAction, 'Add Item'));
+    await tester.tap(find.byType(AppBottomBarAction));
     await settle(tester);
     await tester.enterText(
         find.widgetWithText(TextFormField, 'Item name'), 'Passport');

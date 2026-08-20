@@ -92,19 +92,29 @@ void main() {
   testWidgets('the trip list carries the three slots', (tester) async {
     await openHome(tester);
 
-    expect(find.text('Home'), findsOneWidget);
-    expect(find.text('Account'), findsOneWidget);
-    expect(find.widgetWithText(AppBottomBarAction, 'Plan a trip'),
-        findsOneWidget);
+    // Home and account are icons; the middle slot is the plus, labelled with
+    // what it adds.
+    expect(find.byTooltip('Home'), findsOneWidget);
+    expect(find.byTooltip('Account'), findsOneWidget);
+    expect(find.byType(AppBottomBarAction), findsOneWidget);
+    expect(find.widgetWithText(AppBottomBarLabel, 'Trip'), findsOneWidget);
+    // The plus says "add"; the label does not repeat it.
+    expect(find.text('Add a trip'), findsNothing);
+    expect(find.text('Plan a trip'), findsNothing);
   }, timeout: _timeout);
 
   testWidgets('the account has left the header for the bar', (tester) async {
     await openHome(tester);
 
-    // One way in, in the bar — not also an icon in the top row.
-    expect(find.byTooltip('Account'), findsNothing);
-    expect(find.byIcon(Icons.person_outline_rounded), findsNothing);
-    expect(find.byIcon(Icons.person_rounded), findsOneWidget);
+    // One way in, and it is in the bar — not also an icon in the top row.
+    expect(find.byTooltip('Account'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(AppBottomBar),
+        matching: find.byTooltip('Account'),
+      ),
+      findsOneWidget,
+    );
     // Saved lists stays in the header: it is about this screen's contents.
     expect(find.byTooltip('Saved lists'), findsOneWidget);
   }, timeout: _timeout);
@@ -112,7 +122,7 @@ void main() {
   testWidgets('the account slot opens the account screen', (tester) async {
     await openHome(tester);
 
-    await tester.tap(find.text('Account'));
+    await tester.tap(find.byTooltip('Account'));
     await settle(tester);
 
     expect(find.text('Sign out'), findsOneWidget);
@@ -130,12 +140,12 @@ void main() {
     ));
     await settle(tester);
 
-    expect(find.widgetWithText(AppBottomBarAction, 'Add Stay'), findsOneWidget);
+    expect(find.widgetWithText(AppBottomBarLabel, 'Stay'), findsOneWidget);
 
     for (final (tab, label) in [
-      ('Transport', 'Add Transport'),
-      ('Items', 'Add Item'),
-      ('Expenses', 'Add Expense'),
+      ('Transport', 'Transport'),
+      ('Items', 'Item'),
+      ('Expenses', 'Expense'),
     ]) {
       // The tab row scrolls when the labels do not all fit across a 360dp
       // phone, so the later ones have to be brought into view first.
@@ -143,7 +153,7 @@ void main() {
       await settle(tester);
       await tester.tap(find.text(tab));
       await settle(tester);
-      expect(find.widgetWithText(AppBottomBarAction, label), findsOneWidget,
+      expect(find.widgetWithText(AppBottomBarLabel, label), findsOneWidget,
           reason: tab);
     }
   }, timeout: _timeout);
@@ -154,14 +164,13 @@ void main() {
 
     await tester.tap(find.text(trip.name));
     await settle(tester);
-    expect(find.text('Add Stay'), findsOneWidget);
+    expect(find.widgetWithText(AppBottomBarLabel, 'Stay'), findsOneWidget);
 
-    await tester.tap(find.text('Home'));
+    await tester.tap(find.byTooltip('Home'));
     await settle(tester);
 
-    // Back on the list, where the middle slot means "plan a trip" again.
-    expect(find.widgetWithText(AppBottomBarAction, 'Plan a trip'),
-        findsOneWidget);
+    // Back on the list, where the middle slot adds a trip again.
+    expect(find.widgetWithText(AppBottomBarLabel, 'Trip'), findsOneWidget);
   }, timeout: _timeout);
 
   testWidgets('the trip list marks home as where you already are',

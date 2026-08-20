@@ -11,6 +11,7 @@ import 'package:packmate/screens/saved_list_detail_screen.dart';
 import 'package:packmate/screens/saved_lists_screen.dart';
 import 'package:packmate/screens/trip_detail_screen.dart';
 import 'package:packmate/theme/app_theme.dart';
+import 'package:packmate/widgets/ui.dart';
 
 // See trip_flow_test.dart for why DB work runs inside runAsync and why we avoid
 // pumpAndSettle.
@@ -32,6 +33,23 @@ Future<void> settle(WidgetTester tester) async {
 }
 
 const _timeout = Timeout(Duration(seconds: 30));
+
+/// The + or − inside the quantity stepper.
+///
+/// Scoped rather than `find.byIcon`: the bottom bar's action is a plus too,
+/// and it comes first in the tree.
+Finder stepperButton(IconData icon) => find
+    .descendant(of: find.byType(AppQuantityStepper), matching: find.byIcon(icon))
+    .first;
+
+/// Taps a stepper button, scrolling it clear of the bottom bar first — the
+/// item row is the last thing in the list, so it sits right at the bar's edge.
+Future<void> tapStepper(WidgetTester tester, IconData icon) async {
+  await tester.ensureVisible(stepperButton(icon));
+  await settle(tester);
+  await tester.tap(stepperButton(icon));
+  await settle(tester);
+}
 
 void main() {
   setUpAll(() {
@@ -119,20 +137,16 @@ void main() {
     await openItemsTab(tester);
     expect(find.text('2'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.add_rounded).first);
-    await settle(tester);
+    await tapStepper(tester, Icons.add_rounded);
     expect((await real(tester, () => db.getItemsForTrip(trip.id!))).single.quantity, 3);
 
-    await tester.tap(find.byIcon(Icons.remove_rounded).first);
-    await settle(tester);
-    await tester.tap(find.byIcon(Icons.remove_rounded).first);
-    await settle(tester);
+    await tapStepper(tester, Icons.remove_rounded);
+    await tapStepper(tester, Icons.remove_rounded);
     final items = await real(tester, () => db.getItemsForTrip(trip.id!));
     expect(items.single.quantity, 1);
 
     // At one, the minus is disabled rather than deleting the item.
-    await tester.tap(find.byIcon(Icons.remove_rounded).first);
-    await settle(tester);
+    await tapStepper(tester, Icons.remove_rounded);
     expect((await real(tester, () => db.getItemsForTrip(trip.id!))).single.quantity, 1);
   }, timeout: _timeout);
 

@@ -63,7 +63,7 @@ void main() {
     expect(find.text('No stays yet'), findsOneWidget);
 
     // Add a stay: the edit screen has a hotel field with default times.
-    await tester.tap(find.widgetWithText(AppBottomBarAction, 'Add Stay'));
+    await tester.tap(find.byType(AppBottomBarAction));
     await settle(tester);
     await tester.enterText(
         find.byType(TextFormField), 'Hotel Polo Towers');
@@ -113,7 +113,7 @@ void main() {
     expect(find.textContaining('No transport yet'), findsOneWidget);
 
     await tester
-        .tap(find.widgetWithText(AppBottomBarAction, 'Add Transport'));
+        .tap(find.byType(AppBottomBarAction));
     await settle(tester);
 
     // Choose Train from the segmented type selector.

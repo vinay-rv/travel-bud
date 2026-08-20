@@ -78,7 +78,7 @@ void main() {
   testWidgets('add an item and see it on the packing list', (tester) async {
     await openItemsTab(tester);
 
-    await tester.tap(find.widgetWithText(AppBottomBarAction, 'Add Item'));
+    await tester.tap(find.byType(AppBottomBarAction));
     await settle(tester);
     await tester.enterText(find.byType(TextFormField), 'Passport');
     await tester.tap(find.widgetWithText(FilledButton, 'Add item'));
@@ -99,7 +99,10 @@ void main() {
     await openItemsTab(tester);
     expect(find.text('Charger'), findsOneWidget);
 
-    // Tap the checkbox to pack it.
+    // Tap the checkbox to pack it. Scrolled into view first: the bottom bar
+    // covers the foot of the list on a short phone.
+    await tester.ensureVisible(find.byType(Checkbox).first);
+    await settle(tester);
     await tester.tap(find.byType(Checkbox).first);
     await settle(tester);
 
@@ -136,6 +139,9 @@ void main() {
     await openItemsTab(tester);
     expect(find.text('Sunglasses'), findsOneWidget);
 
+    // Scrolled clear of the bottom bar: the row is the last in the list.
+    await tester.ensureVisible(find.byIcon(Icons.more_vert));
+    await settle(tester);
     await tester.tap(find.byIcon(Icons.more_vert));
     await settle(tester);
     await tester.tap(find.text('Delete').last);

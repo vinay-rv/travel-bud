@@ -162,15 +162,16 @@ class _TripDetailScreenState extends State<TripDetailScreen>
     );
   }
 
-  /// What "add" means on the tab you are looking at. The middle slot of the
-  /// bottom bar is one button whose meaning follows the tab, rather than four
-  /// buttons taking turns.
+  /// What the bottom bar's plus adds on the tab you are looking at. One button
+  /// whose meaning follows the tab, rather than four taking turns.
+  ///
+  /// Bare nouns: the plus already says "add".
   ({String label, VoidCallback onPressed}) get _currentAdd {
     return switch (_tabController.index) {
-      0 => (label: 'Add Stay', onPressed: _addStay),
-      1 => (label: 'Add Transport', onPressed: _addTransport),
-      2 => (label: 'Add Item', onPressed: _addItem),
-      _ => (label: 'Add Expense', onPressed: _addExpense),
+      0 => (label: 'Stay', onPressed: _addStay),
+      1 => (label: 'Transport', onPressed: _addTransport),
+      2 => (label: 'Item', onPressed: _addItem),
+      _ => (label: 'Expense', onPressed: _addExpense),
     };
   }
 

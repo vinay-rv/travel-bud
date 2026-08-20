@@ -42,11 +42,7 @@ class _Glow extends StatelessWidget {
   final double size;
   final double opacity;
 
-  const _Glow({
-    required this.color,
-    required this.size,
-    required this.opacity,
-  });
+  const _Glow({required this.color, required this.size, required this.opacity});
 
   @override
   Widget build(BuildContext context) {
@@ -262,7 +258,11 @@ class AppProgressBar extends StatelessWidget {
   final double value;
   final Color color;
 
-  const AppProgressBar({super.key, required this.value, this.color = AppColors.mint});
+  const AppProgressBar({
+    super.key,
+    required this.value,
+    this.color = AppColors.mint,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -291,7 +291,7 @@ class AppEmptyState extends StatelessWidget {
   final Color accent;
 
   /// Optional call to action shown under the copy — the way out of the empty
-  /// state, when there is one beyond the screen's own FAB.
+  /// state, when there is one beyond the screen's own primary button.
   final Widget? action;
 
   const AppEmptyState({
@@ -306,40 +306,49 @@ class AppEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    // Centred when there is room, scrollable when there is not: a fixed
+    // centred column overflows on a short viewport or at a large text scale,
+    // and an empty state that clips its own way out is worse than one that
+    // scrolls. A Center around the scroll view rather than a LayoutBuilder
+    // inside it — these sit in a SliverFillRemaining, which asks for intrinsic
+    // dimensions a LayoutBuilder cannot supply.
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xxl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 84,
-              height: 84,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    accent.withValues(alpha: 0.22),
-                    accent.withValues(alpha: 0.04),
-                  ],
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xxl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 84,
+                height: 84,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      accent.withValues(alpha: 0.22),
+                      accent.withValues(alpha: 0.04),
+                    ],
+                  ),
+                  border: Border.all(color: accent.withValues(alpha: 0.22)),
                 ),
-                border: Border.all(color: accent.withValues(alpha: 0.22)),
+                child: Icon(icon, size: 34, color: accent),
               ),
-              child: Icon(icon, size: 34, color: accent),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            Text(title, style: theme.textTheme.titleLarge),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-            if (action != null) ...[
               const SizedBox(height: AppSpacing.xl),
-              action!,
+              Text(title, style: theme.textTheme.titleLarge),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium,
+              ),
+              if (action != null) ...[
+                const SizedBox(height: AppSpacing.xl),
+                action!,
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -453,7 +462,11 @@ class AppRowMenu extends StatelessWidget {
             height: 44,
             child: Row(
               children: [
-                Icon(extraActions[i].icon, size: 18, color: AppColors.textMuted),
+                Icon(
+                  extraActions[i].icon,
+                  size: 18,
+                  color: AppColors.textMuted,
+                ),
                 const SizedBox(width: 10),
                 Text(extraActions[i].label),
               ],
@@ -591,8 +604,10 @@ class _TextPromptDialogState extends State<_TextPromptDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (widget.message != null) ...[
-            Text(widget.message!,
-                style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              widget.message!,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
             const SizedBox(height: AppSpacing.lg),
           ],
           TextField(

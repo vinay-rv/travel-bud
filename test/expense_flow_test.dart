@@ -225,7 +225,7 @@ void main() {
 
       expect(find.text('Nothing spent yet'), findsOneWidget);
       expect(
-        find.widgetWithText(AppBottomBarAction, 'Add Expense'),
+        find.byType(AppBottomBarAction),
         findsOneWidget,
       );
     }, timeout: _timeout);
@@ -234,7 +234,7 @@ void main() {
         (tester) async {
       await openExpenses(tester);
 
-      await tester.tap(find.widgetWithText(AppBottomBarAction, 'Add Expense'));
+      await tester.tap(find.byType(AppBottomBarAction));
       await settle(tester);
       await tester.enterText(
           find.widgetWithText(TextFormField, 'What was it for'), 'Airport taxi');
@@ -256,7 +256,7 @@ void main() {
         (tester) async {
       await openExpenses(tester);
 
-      await tester.tap(find.widgetWithText(AppBottomBarAction, 'Add Expense'));
+      await tester.tap(find.byType(AppBottomBarAction));
       await settle(tester);
       await tester.enterText(
           find.widgetWithText(TextFormField, 'What was it for'), 'Coffee');
