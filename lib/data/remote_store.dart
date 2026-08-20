@@ -16,14 +16,36 @@ class RemoteTable {
   /// What the parent is called on the wire, e.g. `tripUuid`.
   final String? parentWireColumn;
 
+  /// Further foreign keys that also travel as uuids.
+  ///
+  /// Unlike the parent these are optional: a row whose reference cannot be
+  /// resolved still belongs to the account and is kept, with the reference
+  /// left empty. An item whose bag went missing is still an item to pack.
+  final List<RemoteRef> refs;
+
   const RemoteTable(
     this.name, {
     this.parentColumn,
     this.parentTable,
     this.parentWireColumn,
+    this.refs = const [],
   });
 
   bool get hasParent => parentColumn != null;
+}
+
+/// A nullable foreign key sent as the target row's uuid.
+class RemoteRef {
+  /// Local column holding the target's integer id, e.g. `bagId`.
+  final String column;
+
+  /// The table [column] points at.
+  final String table;
+
+  /// What it is called on the wire, e.g. `bagUuid`.
+  final String wireColumn;
+
+  const RemoteRef(this.column, this.table, this.wireColumn);
 }
 
 /// Tables the server holds, parents before children.
@@ -36,8 +58,13 @@ const remoteTables = <RemoteTable>[
       parentColumn: 'tripId', parentTable: 'trips', parentWireColumn: 'tripUuid'),
   RemoteTable('transport_legs',
       parentColumn: 'tripId', parentTable: 'trips', parentWireColumn: 'tripUuid'),
-  RemoteTable('items',
+  RemoteTable('bags',
       parentColumn: 'tripId', parentTable: 'trips', parentWireColumn: 'tripUuid'),
+  RemoteTable('items',
+      parentColumn: 'tripId',
+      parentTable: 'trips',
+      parentWireColumn: 'tripUuid',
+      refs: [RemoteRef('bagId', 'bags', 'bagUuid')]),
   RemoteTable('expenses',
       parentColumn: 'tripId', parentTable: 'trips', parentWireColumn: 'tripUuid'),
   RemoteTable('packing_lists'),

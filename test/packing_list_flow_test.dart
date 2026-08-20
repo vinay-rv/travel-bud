@@ -96,10 +96,14 @@ void main() {
     await openItemsTab(tester);
 
     expect(find.text('Clothes'), findsOneWidget);
-    expect(find.text('Electronics'), findsOneWidget);
     // Categories with nothing in them stay hidden.
     expect(find.text('Hygiene'), findsNothing);
     expect(find.text('0/2'), findsOneWidget);
+
+    // The last group sits below the fold on a small phone.
+    await tester.drag(find.byType(ListView).last, const Offset(0, -200));
+    await settle(tester);
+    expect(find.text('Electronics'), findsOneWidget);
   }, timeout: _timeout);
 
   testWidgets('the + and − steppers change how many to bring', (tester) async {
@@ -258,6 +262,8 @@ void main() {
     await settle(tester);
     expect(find.text('Passport'), findsOneWidget);
 
+    // A saved list is a pushed screen, not a place in the bottom bar, so it
+    // keeps its own floating button.
     await tester.tap(find.widgetWithText(FloatingActionButton, 'Add Item'));
     await settle(tester);
     await tester.enterText(find.byType(TextFormField), 'Rain jacket');

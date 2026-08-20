@@ -7,6 +7,7 @@ import 'package:packmate/models/expense.dart';
 import 'package:packmate/models/trip.dart';
 import 'package:packmate/screens/trip_detail_screen.dart';
 import 'package:packmate/theme/app_theme.dart';
+import 'package:packmate/widgets/app_bottom_bar.dart';
 
 import 'write_through_test.dart' show FakeRemoteStore;
 
@@ -224,7 +225,7 @@ void main() {
 
       expect(find.text('Nothing spent yet'), findsOneWidget);
       expect(
-        find.widgetWithText(FloatingActionButton, 'Add Expense'),
+        find.widgetWithText(AppBottomBarAction, 'Add Expense'),
         findsOneWidget,
       );
     }, timeout: _timeout);
@@ -233,7 +234,7 @@ void main() {
         (tester) async {
       await openExpenses(tester);
 
-      await tester.tap(find.widgetWithText(FloatingActionButton, 'Add Expense'));
+      await tester.tap(find.widgetWithText(AppBottomBarAction, 'Add Expense'));
       await settle(tester);
       await tester.enterText(
           find.widgetWithText(TextFormField, 'What was it for'), 'Airport taxi');
@@ -255,7 +256,7 @@ void main() {
         (tester) async {
       await openExpenses(tester);
 
-      await tester.tap(find.widgetWithText(FloatingActionButton, 'Add Expense'));
+      await tester.tap(find.widgetWithText(AppBottomBarAction, 'Add Expense'));
       await settle(tester);
       await tester.enterText(
           find.widgetWithText(TextFormField, 'What was it for'), 'Coffee');

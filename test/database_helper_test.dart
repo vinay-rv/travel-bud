@@ -8,6 +8,7 @@ import 'package:packmate/data/database_helper.dart';
 import 'package:packmate/models/trip.dart';
 import 'package:packmate/models/stay.dart';
 import 'package:packmate/models/transport_leg.dart';
+import 'package:packmate/models/bag.dart';
 import 'package:packmate/models/item.dart';
 import 'package:packmate/models/item_category.dart';
 import 'package:packmate/models/document.dart';
@@ -621,6 +622,123 @@ void main() {
           expect(row['uuid'], isNotNull, reason: table);
         }
       }
+    });
+
+    test('v5 items gain a bag column and the bags table appears', () async {
+      final dir = await Directory.systemTemp.createTemp('trip_db_v5');
+      final path = join(dir.path, 'v5.db');
+      addTearDown(() => dir.delete(recursive: true));
+
+      // A v5 database: items know about categories and quantities, but there
+      // are no bags and nothing to point at one.
+      final legacy = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(version: 5),
+      );
+      await legacy.execute('''
+        CREATE TABLE trips (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          startDate INTEGER NOT NULL,
+          endDate INTEGER NOT NULL
+        )
+      ''');
+      await legacy.execute('''
+        CREATE TABLE items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tripId INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          category TEXT NOT NULL DEFAULT 'other',
+          quantity INTEGER NOT NULL DEFAULT 1,
+          packed INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (tripId) REFERENCES trips (id) ON DELETE CASCADE
+        )
+      ''');
+      final tripId = await legacy.insert('trips', {
+        'name': 'Northeast India',
+        'startDate': DateTime(2026, 3, 1).millisecondsSinceEpoch,
+        'endDate': DateTime(2026, 3, 8).millisecondsSinceEpoch,
+      });
+      await legacy.insert('items', {
+        'tripId': tripId,
+        'name': 'Passport',
+        'category': 'documents',
+        'quantity': 1,
+        'packed': 1,
+      });
+      await legacy.close();
+
+      final upgraded = DatabaseHelper.forTesting(path);
+      addTearDown(upgraded.close);
+
+      // The existing item survives intact, in no bag — which is the truth
+      // about a list written before bags existed.
+      final before = await upgraded.getItemsForTrip(tripId);
+      expect(before.single.name, 'Passport');
+      expect(before.single.category, ItemCategory.documents);
+      expect(before.single.packed, isTrue);
+      expect(before.single.bagId, isNull);
+
+      // And bags now work on the upgraded file.
+      expect(await upgraded.getBagsForTrip(tripId), isEmpty);
+      final bag = await upgraded.createBag(Bag(tripId: tripId, name: 'Cabin'));
+      await upgraded.setItemBag(before.single.id!, bag.id);
+      expect((await upgraded.getItemsForTrip(tripId)).single.bagId, bag.id);
+
+      // Bags carry sync metadata like every other table.
+      final database = await upgraded.database;
+      final rows = await database.query('bags');
+      expect(rows.single['uuid'], isNotNull);
+    });
+
+    test('a database stamped current but missing bags repairs itself',
+        () async {
+      // The same failure mode as the v3 case above: the file claims to be
+      // current, so onUpgrade will never run for it again.
+      final dir = await Directory.systemTemp.createTemp('trip_db_stale_bags');
+      final path = join(dir.path, 'stale.db');
+      addTearDown(() => dir.delete(recursive: true));
+
+      final stale = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(version: 6),
+      );
+      await stale.execute('''
+        CREATE TABLE trips (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          startDate INTEGER NOT NULL,
+          endDate INTEGER NOT NULL
+        )
+      ''');
+      await stale.execute('''
+        CREATE TABLE items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tripId INTEGER NOT NULL,
+          name TEXT NOT NULL,
+          category TEXT NOT NULL DEFAULT 'other',
+          quantity INTEGER NOT NULL DEFAULT 1,
+          packed INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (tripId) REFERENCES trips (id) ON DELETE CASCADE
+        )
+      ''');
+      final tripId = await stale.insert('trips', {
+        'name': 'Northeast India',
+        'startDate': DateTime(2026, 3, 1).millisecondsSinceEpoch,
+        'endDate': DateTime(2026, 3, 8).millisecondsSinceEpoch,
+      });
+      await stale.close();
+
+      final repaired = DatabaseHelper.forTesting(path);
+      addTearDown(repaired.close);
+
+      final bag = await repaired.createBag(Bag(tripId: tripId, name: 'Cabin'));
+      final item = await repaired.createItem(Item(
+        tripId: tripId,
+        name: 'Charger',
+        bagId: bag.id,
+      ));
+      expect((await repaired.getItemsForTrip(tripId)).single.bagId, item.bagId);
     });
   });
 

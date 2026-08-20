@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../models/bag.dart';
 import '../models/item_category.dart';
 import '../theme/app_theme.dart';
+import '../theme/bag_style.dart';
 import '../theme/category_style.dart';
 import 'ui.dart';
 
-/// The three fields that describe anything packable — name, category, and how
-/// many — shared by the trip item editor and the saved list entry editor so
-/// both stay identical.
+/// The fields that describe anything packable — name, category, and how many —
+/// shared by the trip item editor and the saved list entry editor so both stay
+/// identical.
+///
+/// Bags are the one part that is not shared: they belong to a trip, and a
+/// saved list is a template that outlives any particular set of luggage. Pass
+/// [bags] to show the section; leave it null and it is absent entirely.
 class ItemFields extends StatelessWidget {
   final TextEditingController nameController;
   final ItemCategory category;
@@ -16,6 +22,15 @@ class ItemFields extends StatelessWidget {
   final ValueChanged<int> onQuantityChanged;
   final VoidCallback onSubmitted;
   final bool autofocus;
+
+  /// The trip's bags, or null on editors where bags do not apply.
+  final List<Bag>? bags;
+  final int? bagId;
+  final ValueChanged<int?>? onBagChanged;
+
+  /// Names a new bag and returns it, so one can be added without abandoning a
+  /// half-filled form.
+  final Future<Bag?> Function()? onCreateBag;
 
   const ItemFields({
     super.key,
@@ -26,7 +41,16 @@ class ItemFields extends StatelessWidget {
     required this.onQuantityChanged,
     required this.onSubmitted,
     this.autofocus = false,
+    this.bags,
+    this.bagId,
+    this.onBagChanged,
+    this.onCreateBag,
   });
+
+  Future<void> _createBag() async {
+    final bag = await onCreateBag?.call();
+    if (bag != null) onBagChanged?.call(bag.id);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -64,8 +88,10 @@ class ItemFields extends StatelessWidget {
               runSpacing: AppSpacing.sm,
               children: [
                 for (final value in ItemCategory.values)
-                  _CategoryChip(
-                    category: value,
+                  _ChoiceChip(
+                    label: value.label,
+                    icon: value.icon,
+                    accent: value.color,
                     selected: value == category,
                     onTap: () => onCategoryChanged(value),
                   ),
@@ -73,6 +99,42 @@ class ItemFields extends StatelessWidget {
             ),
           ],
         ),
+        if (bags != null)
+          FormSection(
+            label: 'Which bag',
+            children: [
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  for (final bag in bags!)
+                    _ChoiceChip(
+                      label: bag.name,
+                      icon: bagIcon,
+                      accent: bagColor(bag.id),
+                      selected: bag.id == bagId,
+                      onTap: () => onBagChanged?.call(bag.id),
+                    ),
+                  _ChoiceChip(
+                    label: unassignedBagLabel,
+                    icon: Icons.inventory_2_outlined,
+                    accent: bagColor(null),
+                    selected: bagId == null,
+                    onTap: () => onBagChanged?.call(null),
+                  ),
+                  if (onCreateBag != null)
+                    _ChoiceChip(
+                      label: 'New bag',
+                      icon: Icons.add_rounded,
+                      accent: AppColors.primary,
+                      selected: false,
+                      showIconWhenSelected: true,
+                      onTap: _createBag,
+                    ),
+                ],
+              ),
+            ],
+          ),
         FormSection(
           label: 'How many',
           children: [
@@ -100,21 +162,30 @@ class ItemFields extends StatelessWidget {
   }
 }
 
-class _CategoryChip extends StatelessWidget {
-  final ItemCategory category;
+/// A selectable pill. Shared by categories and bags so the two rows of chips
+/// cannot drift apart.
+class _ChoiceChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color accent;
   final bool selected;
   final VoidCallback onTap;
 
-  const _CategoryChip({
-    required this.category,
+  /// Selection normally swaps the icon for a tick. Actions that are not a
+  /// selection at all — "New bag" — keep their own icon.
+  final bool showIconWhenSelected;
+
+  const _ChoiceChip({
+    required this.label,
+    required this.icon,
+    required this.accent,
     required this.selected,
     required this.onTap,
+    this.showIconWhenSelected = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final accent = category.color;
-
     return Semantics(
       selected: selected,
       button: true,
@@ -126,6 +197,7 @@ class _CategoryChip extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            constraints: const BoxConstraints(maxWidth: 260),
             decoration: BoxDecoration(
               color: selected
                   ? accent.withValues(alpha: 0.16)
@@ -141,17 +213,21 @@ class _CategoryChip extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  selected ? Icons.check_rounded : category.icon,
+                  selected && !showIconWhenSelected ? Icons.check_rounded : icon,
                   size: 16,
                   color: selected ? accent : AppColors.textMuted,
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                Text(
-                  category.label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    color: selected ? accent : AppColors.textMuted,
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                      color: selected ? accent : AppColors.textMuted,
+                    ),
                   ),
                 ),
               ],

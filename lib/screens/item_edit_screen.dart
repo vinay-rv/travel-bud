@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/database_helper.dart';
+import '../models/bag.dart';
 import '../models/item.dart';
 import '../models/item_category.dart';
 import '../theme/category_style.dart';
@@ -18,6 +19,9 @@ class ItemEditScreen extends StatefulWidget {
   /// Preselects a category — used when adding from within a category.
   final ItemCategory? initialCategory;
 
+  /// Preselects a bag — used when adding from within one.
+  final int? initialBagId;
+
   /// Injectable for tests; defaults to the app-wide singleton.
   final DatabaseHelper? db;
 
@@ -26,6 +30,7 @@ class ItemEditScreen extends StatefulWidget {
     required this.tripId,
     this.existing,
     this.initialCategory,
+    this.initialBagId,
     this.db,
   });
 
@@ -40,7 +45,12 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   late final TextEditingController _nameController;
   late ItemCategory _category;
   late int _quantity;
+  int? _bagId;
   bool _saving = false;
+
+  /// The trip's bags. Empty until they load, which only costs the bag chips a
+  /// frame — the rest of the form is usable immediately.
+  List<Bag> _bags = const [];
 
   DatabaseHelper get _db => widget.db ?? DatabaseHelper.instance;
 
@@ -52,6 +62,29 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
         widget.initialCategory ??
         ItemCategory.other;
     _quantity = widget.existing?.quantity ?? 1;
+    _bagId = widget.existing?.bagId ?? widget.initialBagId;
+    _loadBags();
+  }
+
+  Future<void> _loadBags() async {
+    final bags = await _db.getBagsForTrip(widget.tripId);
+    if (mounted) setState(() => _bags = bags);
+  }
+
+  /// Names a bag from inside the form, without losing what has been typed.
+  Future<Bag?> _createBag() async {
+    final name = await promptForText(
+      context,
+      title: 'New bag',
+      message: 'Name a bag you are packing into, so you know what is where.',
+      label: 'Bag name',
+      hintText: 'e.g. Cabin bag, Rucksack',
+      actionLabel: 'Add bag',
+    );
+    if (name == null) return null;
+    final bag = await _db.createBag(Bag(tripId: widget.tripId, name: name));
+    if (mounted) setState(() => _bags = [..._bags, bag]);
+    return bag;
   }
 
   @override
@@ -71,6 +104,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
       category: _category,
       quantity: _quantity,
       packed: widget.existing?.packed ?? false,
+      bagId: _bagId,
     );
 
     try {
@@ -108,8 +142,12 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
           category: _category,
           quantity: _quantity,
           autofocus: !widget.isEditing,
+          bags: _bags,
+          bagId: _bagId,
           onCategoryChanged: (value) => setState(() => _category = value),
           onQuantityChanged: (value) => setState(() => _quantity = value),
+          onBagChanged: (value) => setState(() => _bagId = value),
+          onCreateBag: _createBag,
           onSubmitted: _save,
         ),
         const FormHint(

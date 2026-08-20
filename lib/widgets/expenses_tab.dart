@@ -100,7 +100,7 @@ class ExpensesTabState extends State<ExpensesTab>
             AppSpacing.gutter,
             AppSpacing.md,
             AppSpacing.gutter,
-            110,
+            AppSpacing.xl,
           ),
           children: [
             _TotalCard(total: total, count: expenses.length),

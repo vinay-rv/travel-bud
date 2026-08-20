@@ -65,9 +65,22 @@ const tables = {
       toLocation: z.string().min(1).max(200),
     }),
   },
+  bags: {
+    delegate: () => prisma.bag,
+    parent: { field: 'tripUuid', delegate: () => prisma.trip },
+    schema: z.object({
+      uuid,
+      tripUuid: uuid,
+      name: z.string().min(1).max(200),
+    }),
+  },
   items: {
     delegate: () => prisma.item,
     parent: { field: 'tripUuid', delegate: () => prisma.trip },
+    // A second reference, and unlike the parent an optional one. It gets its
+    // own ownership check: the foreign key would happily accept a bag uuid
+    // belonging to somebody else, and a client is free to send one.
+    refs: [{ field: 'bagUuid', delegate: () => prisma.bag }],
     schema: z.object({
       uuid,
       tripUuid: uuid,
@@ -77,6 +90,7 @@ const tables = {
       category: z.string().max(40).default('other'),
       quantity: z.coerce.number().int().min(1).max(999).default(1),
       packed: z.coerce.boolean().default(false),
+      bagUuid: uuid.nullish(),
     }),
   },
   expenses: {
@@ -173,6 +187,34 @@ export async function syncRoutes(app: FastifyInstance): Promise<void> {
           403,
           'unknown_parent',
           'That trip or list does not belong to you',
+        );
+      }
+    }
+
+    // Same check for optional references. Absent and null both mean "no bag",
+    // and neither needs verifying — only a uuid the caller actually named.
+    const refs = 'refs' in config ? config.refs : [];
+    for (const ref of refs) {
+      const referenced = [
+        ...new Set(
+          rows
+            .map((row) => (row as unknown as Record<string, unknown>)[ref.field])
+            .filter((value): value is string => typeof value === 'string'),
+        ),
+      ];
+      if (referenced.length === 0) continue;
+
+      const owned = await (ref.delegate() as any).findMany({
+        where: { uuid: { in: referenced }, userId },
+        select: { uuid: true },
+      });
+      const ownedUuids = new Set(owned.map((row: { uuid: string }) => row.uuid));
+      const stranger = referenced.find((value) => !ownedUuids.has(value));
+      if (stranger) {
+        throw new AuthError(
+          403,
+          'unknown_reference',
+          'That bag does not belong to you',
         );
       }
     }

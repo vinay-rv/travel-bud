@@ -387,6 +387,19 @@ class AppErrorState extends StatelessWidget {
 }
 
 /// The overflow menu shown on every editable row.
+/// One row-menu entry beyond the standard Edit and Delete.
+class AppRowMenuAction {
+  final String label;
+  final IconData icon;
+  final VoidCallback onSelected;
+
+  const AppRowMenuAction({
+    required this.label,
+    required this.icon,
+    required this.onSelected,
+  });
+}
+
 class AppRowMenu extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -396,12 +409,16 @@ class AppRowMenu extends StatelessWidget {
   final String editLabel;
   final IconData editIcon;
 
+  /// Sit between Edit and Delete, so the destructive entry stays last.
+  final List<AppRowMenuAction> extraActions;
+
   const AppRowMenu({
     super.key,
     required this.onEdit,
     required this.onDelete,
     this.editLabel = 'Edit',
     this.editIcon = Icons.edit_outlined,
+    this.extraActions = const [],
   });
 
   @override
@@ -414,6 +431,9 @@ class AppRowMenu extends StatelessWidget {
       onSelected: (value) {
         if (value == 'edit') onEdit();
         if (value == 'delete') onDelete();
+        if (value.startsWith('extra:')) {
+          extraActions[int.parse(value.substring(6))].onSelected();
+        }
       },
       itemBuilder: (context) => [
         PopupMenuItem(
@@ -427,6 +447,18 @@ class AppRowMenu extends StatelessWidget {
             ],
           ),
         ),
+        for (var i = 0; i < extraActions.length; i++)
+          PopupMenuItem(
+            value: 'extra:$i',
+            height: 44,
+            child: Row(
+              children: [
+                Icon(extraActions[i].icon, size: 18, color: AppColors.textMuted),
+                const SizedBox(width: 10),
+                Text(extraActions[i].label),
+              ],
+            ),
+          ),
         const PopupMenuItem(
           value: 'delete',
           height: 44,
@@ -488,9 +520,10 @@ Future<bool> confirmDestructive(
 Future<String?> promptForText(
   BuildContext context, {
   required String title,
-  required String message,
   required String label,
   required String actionLabel,
+  String? message,
+  String? hintText,
   String initialValue = '',
 }) {
   return showDialog<String>(
@@ -500,6 +533,7 @@ Future<String?> promptForText(
       message: message,
       label: label,
       actionLabel: actionLabel,
+      hintText: hintText,
       initialValue: initialValue,
     ),
   );
@@ -509,9 +543,10 @@ Future<String?> promptForText(
 /// disposing alongside the future would kill it mid dismiss-animation.
 class _TextPromptDialog extends StatefulWidget {
   final String title;
-  final String message;
+  final String? message;
   final String label;
   final String actionLabel;
+  final String? hintText;
   final String initialValue;
 
   const _TextPromptDialog({
@@ -519,6 +554,7 @@ class _TextPromptDialog extends StatefulWidget {
     required this.message,
     required this.label,
     required this.actionLabel,
+    required this.hintText,
     required this.initialValue,
   });
 
@@ -554,13 +590,19 @@ class _TextPromptDialogState extends State<_TextPromptDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(widget.message, style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: AppSpacing.lg),
+          if (widget.message != null) ...[
+            Text(widget.message!,
+                style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: AppSpacing.lg),
+          ],
           TextField(
             controller: _controller,
             autofocus: true,
             textCapitalization: TextCapitalization.sentences,
-            decoration: InputDecoration(labelText: widget.label),
+            decoration: InputDecoration(
+              labelText: widget.label,
+              hintText: widget.hintText,
+            ),
             onSubmitted: (_) => _submit(),
           ),
         ],

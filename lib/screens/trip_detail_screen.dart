@@ -17,12 +17,19 @@ import '../widgets/expenses_tab.dart';
 import '../widgets/ui.dart';
 import 'expense_edit_screen.dart';
 import 'item_edit_screen.dart';
+import '../widgets/app_bottom_bar.dart';
+import 'account_screen.dart';
+import 'auth/auth_gate.dart';
 import 'stay_edit_screen.dart';
 import 'transport_edit_screen.dart';
 import 'trip_edit_screen.dart';
 
-/// Trip detail with tabs. Stays and Transport are fully editable here; Items
-/// and Documents arrive in later build steps.
+/// Trip detail with tabs.
+///
+/// Documents is deliberately absent: it was a placeholder promising a vault
+/// that does not exist yet, and an empty tab costs a slot in a row that has to
+/// fit on a phone. The model, table and screens are all still there, so it
+/// comes back by re-adding the tab once there is something to put in it.
 class TripDetailScreen extends StatefulWidget {
   final Trip trip;
 
@@ -32,11 +39,16 @@ class TripDetailScreen extends StatefulWidget {
   /// Injectable for tests; defaults to the app-wide singleton.
   final DatabaseHelper? db;
 
+  /// Lets the account screen end the session and send the app back to
+  /// sign-in. Threaded down from the gate, same as on the trip list.
+  final SignedOutCallback? onSignedOut;
+
   const TripDetailScreen({
     super.key,
     required this.trip,
     this.initialTab = 0,
     this.db,
+    this.onSignedOut,
   });
 
   @override
@@ -50,7 +62,6 @@ class _TripDetailScreenState extends State<TripDetailScreen>
     'Transport',
     'Items',
     'Expenses',
-    'Documents',
   ];
 
   late final TabController _tabController;
@@ -90,7 +101,12 @@ class _TripDetailScreenState extends State<TripDetailScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.canvas,
-      floatingActionButton: _buildFab(),
+      bottomNavigationBar: AppBottomBar(
+        onHome: () => Navigator.of(context).pop(),
+        onAction: _currentAdd.onPressed,
+        actionLabel: _currentAdd.label,
+        onAccount: _openAccount,
+      ),
       body: AppBackground(
         glow: _accent,
         child: SafeArea(
@@ -136,14 +152,6 @@ class _TripDetailScreenState extends State<TripDetailScreen>
                       tripId: _trip.id!,
                       db: widget.db,
                     ),
-                    const AppEmptyState(
-                      icon: Icons.folder_copy_outlined,
-                      title: 'Document vault',
-                      message:
-                          'Passports, tickets, and booking confirmations will '
-                          'live here in a later build step.',
-                      accent: AppColors.violet,
-                    ),
                   ],
                 ),
               ),
@@ -154,39 +162,27 @@ class _TripDetailScreenState extends State<TripDetailScreen>
     );
   }
 
-  Widget? _buildFab() {
-    switch (_tabController.index) {
-      case 0:
-        return AppFab(
-          heroTag: 'add-stay',
-          onPressed: _addStay,
-          icon: Icons.add_rounded,
-          label: 'Add Stay',
-        );
-      case 1:
-        return AppFab(
-          heroTag: 'add-transport',
-          onPressed: _addTransport,
-          icon: Icons.add_rounded,
-          label: 'Add Transport',
-        );
-      case 2:
-        return AppFab(
-          heroTag: 'add-item',
-          onPressed: _addItem,
-          icon: Icons.add_rounded,
-          label: 'Add Item',
-        );
-      case 3:
-        return AppFab(
-          heroTag: 'add-expense',
-          onPressed: _addExpense,
-          icon: Icons.add_rounded,
-          label: 'Add Expense',
-        );
-      default:
-        return null;
-    }
+  /// What "add" means on the tab you are looking at. The middle slot of the
+  /// bottom bar is one button whose meaning follows the tab, rather than four
+  /// buttons taking turns.
+  ({String label, VoidCallback onPressed}) get _currentAdd {
+    return switch (_tabController.index) {
+      0 => (label: 'Add Stay', onPressed: _addStay),
+      1 => (label: 'Add Transport', onPressed: _addTransport),
+      2 => (label: 'Add Item', onPressed: _addItem),
+      _ => (label: 'Add Expense', onPressed: _addExpense),
+    };
+  }
+
+  Future<void> _openAccount() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AccountScreen(
+          db: widget.db,
+          onSignedOut: widget.onSignedOut,
+        ),
+      ),
+    );
   }
 
   Future<void> _addStay() async {
@@ -614,7 +610,7 @@ class _StaysTabState extends State<StaysTab>
             AppSpacing.gutter,
             AppSpacing.md,
             AppSpacing.gutter,
-            110,
+            AppSpacing.xl,
           ),
           itemCount: stays.length,
           separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
@@ -897,7 +893,7 @@ class _TransportTabState extends State<TransportTab>
             AppSpacing.gutter,
             AppSpacing.md,
             AppSpacing.gutter,
-            110,
+            AppSpacing.xl,
           ),
           itemCount: legs.length,
           separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),

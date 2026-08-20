@@ -221,3 +221,180 @@ describe('The whole shape a client syncs', () => {
     expect(item).toMatchObject({ name: 'T-shirts', category: 'clothes', quantity: 3, packed: true });
   });
 });
+
+describe('Bags', () => {
+  const bag = (uuid: string, tripUuid: string, name = 'Cabin bag') => ({
+    uuid,
+    tripUuid,
+    name,
+  });
+
+  const item = (
+    uuid: string,
+    tripUuid: string,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    uuid,
+    tripUuid,
+    name: 'Passport',
+    category: 'documents',
+    quantity: 1,
+    packed: false,
+    ...extra,
+  });
+
+  it('round-trips a bag and an item that points at it', async () => {
+    const tripUuid = randomUUID();
+    const bagUuid = randomUUID();
+    const itemUuid = randomUUID();
+    await pushTrip(alice.accessToken, tripUuid);
+
+    const pushedBag = await post(
+      '/sync/push',
+      { table: 'bags', rows: [bag(bagUuid, tripUuid)] },
+      alice.accessToken,
+    );
+    expect(pushedBag.statusCode).toBe(200);
+
+    const pushedItem = await post(
+      '/sync/push',
+      { table: 'items', rows: [item(itemUuid, tripUuid, { bagUuid })] },
+      alice.accessToken,
+    );
+    expect(pushedItem.statusCode).toBe(200);
+
+    const bags = await pull(alice.accessToken, 'bags');
+    expect(bags.json().rows).toHaveLength(1);
+    expect(bags.json().rows[0]).toMatchObject({ uuid: bagUuid, name: 'Cabin bag' });
+
+    const items = await pull(alice.accessToken, 'items');
+    expect(items.json().rows[0]).toMatchObject({ uuid: itemUuid, bagUuid });
+  });
+
+  it('accepts an item with no bag', async () => {
+    const tripUuid = randomUUID();
+    const itemUuid = randomUUID();
+    await pushTrip(alice.accessToken, tripUuid);
+
+    const pushed = await post(
+      '/sync/push',
+      { table: 'items', rows: [item(itemUuid, tripUuid, { bagUuid: null })] },
+      alice.accessToken,
+    );
+
+    expect(pushed.statusCode).toBe(200);
+    const items = await pull(alice.accessToken, 'items');
+    expect(items.json().rows[0].bagUuid).toBeNull();
+  });
+
+  it('takes an item back out of its bag', async () => {
+    const tripUuid = randomUUID();
+    const bagUuid = randomUUID();
+    const itemUuid = randomUUID();
+    await pushTrip(alice.accessToken, tripUuid);
+    await post(
+      '/sync/push',
+      { table: 'bags', rows: [bag(bagUuid, tripUuid)] },
+      alice.accessToken,
+    );
+    await post(
+      '/sync/push',
+      { table: 'items', rows: [item(itemUuid, tripUuid, { bagUuid })] },
+      alice.accessToken,
+    );
+
+    await post(
+      '/sync/push',
+      { table: 'items', rows: [item(itemUuid, tripUuid, { bagUuid: null })] },
+      alice.accessToken,
+    );
+
+    const items = await pull(alice.accessToken, 'items');
+    expect(items.json().rows[0].bagUuid).toBeNull();
+  });
+
+  it('refuses an item pointing at somebody else\'s bag', async () => {
+    // Bob owns a bag; Alice tries to file one of her items in it. The foreign
+    // key alone would allow this, which is the whole reason for the check.
+    const bobTrip = randomUUID();
+    const bobBag = randomUUID();
+    await pushTrip(bob.accessToken, bobTrip);
+    await post(
+      '/sync/push',
+      { table: 'bags', rows: [bag(bobBag, bobTrip)] },
+      bob.accessToken,
+    );
+
+    const aliceTrip = randomUUID();
+    await pushTrip(alice.accessToken, aliceTrip);
+    const pushed = await post(
+      '/sync/push',
+      {
+        table: 'items',
+        rows: [item(randomUUID(), aliceTrip, { bagUuid: bobBag })],
+      },
+      alice.accessToken,
+    );
+
+    expect(pushed.statusCode).toBe(403);
+    expect(await prisma.item.count()).toBe(0);
+  });
+
+  it('refuses a bag hung off somebody else\'s trip', async () => {
+    const bobTrip = randomUUID();
+    await pushTrip(bob.accessToken, bobTrip);
+
+    const pushed = await post(
+      '/sync/push',
+      { table: 'bags', rows: [bag(randomUUID(), bobTrip)] },
+      alice.accessToken,
+    );
+
+    expect(pushed.statusCode).toBe(403);
+    expect(await prisma.bag.count()).toBe(0);
+  });
+
+  it('never shows one account another account\'s bags', async () => {
+    const aliceTrip = randomUUID();
+    await pushTrip(alice.accessToken, aliceTrip);
+    await post(
+      '/sync/push',
+      { table: 'bags', rows: [bag(randomUUID(), aliceTrip, 'Alice cabin')] },
+      alice.accessToken,
+    );
+
+    const bobs = await pull(bob.accessToken, 'bags');
+    expect(bobs.json().rows).toHaveLength(0);
+  });
+
+  it('deleting a bag keeps the items that were in it', async () => {
+    const tripUuid = randomUUID();
+    const bagUuid = randomUUID();
+    const itemUuid = randomUUID();
+    await pushTrip(alice.accessToken, tripUuid);
+    await post(
+      '/sync/push',
+      { table: 'bags', rows: [bag(bagUuid, tripUuid)] },
+      alice.accessToken,
+    );
+    await post(
+      '/sync/push',
+      { table: 'items', rows: [item(itemUuid, tripUuid, { bagUuid })] },
+      alice.accessToken,
+    );
+
+    // Deletes here are soft, so the bag row survives and the item's reference
+    // is never dangling; the client filters deleted rows out on pull, and an
+    // item whose bag did not arrive simply comes back without one. ON DELETE
+    // SET NULL is the backstop for the hard delete a trip cascade would do.
+    await post(
+      '/sync/deletes',
+      { deletes: [{ table: 'bags', uuid: bagUuid, deletedAt: Date.now() }] },
+      alice.accessToken,
+    );
+
+    const stored = await prisma.item.findUnique({ where: { uuid: itemUuid } });
+    expect(stored).not.toBeNull();
+    expect(stored?.deletedAt).toBeNull();
+  });
+});

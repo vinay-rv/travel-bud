@@ -45,6 +45,7 @@ model User {
   packingListItems   PackingListItem[]
   documents          Document[]
   expenses           Expense[]
+  bags               Bag[]
 
   @@map("users")
 }
@@ -101,6 +102,7 @@ model Trip {
   items         Item[]
   documents     Document[]
   expenses      Expense[]
+  bags          Bag[]
 
   @@index([userId, updatedAt])
   @@map("trips")
@@ -153,14 +155,20 @@ model Item {
   category  String  @default("other")
   quantity  Int     @default(1)
   packed    Boolean @default(false)
+  // Which bag it travels in, or null for "not in a bag". `SetNull` rather than
+  // `Cascade`: deleting a bag must never delete what was inside it, which is
+  // the same rule the app applies locally.
+  bagUuid   String? @db.Uuid
   updatedAt BigInt  @default(0)
   deletedAt BigInt?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   trip Trip @relation(fields: [tripUuid], references: [uuid], onDelete: Cascade)
+  bag  Bag? @relation(fields: [bagUuid], references: [uuid], onDelete: SetNull)
 
   @@index([userId, updatedAt])
   @@index([tripUuid])
+  @@index([bagUuid])
   @@map("items")
 }
 
@@ -206,6 +214,25 @@ model PackingListItem {
 /// No currency field yet. Every amount on a trip is assumed to be in the same
 /// one, which is wrong for a trip that crosses a border and is the obvious next
 /// thing to add.
+/// A named piece of luggage on a trip. Items point at one to say where they
+/// are packed.
+model Bag {
+  uuid      String  @id @db.Uuid
+  userId    String  @db.Uuid
+  tripUuid  String  @db.Uuid
+  name      String
+  updatedAt BigInt  @default(0)
+  deletedAt BigInt?
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip  Trip   @relation(fields: [tripUuid], references: [uuid], onDelete: Cascade)
+  items Item[]
+
+  @@index([userId, updatedAt])
+  @@index([tripUuid])
+  @@map("bags")
+}
+
 model Expense {
   uuid        String  @id @db.Uuid
   userId      String  @db.Uuid

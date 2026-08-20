@@ -7,6 +7,7 @@ import '../theme/app_theme.dart';
 import '../utils/date_format.dart';
 import '../utils/trip_status.dart';
 import '../widgets/ui.dart';
+import '../widgets/app_bottom_bar.dart';
 import 'account_screen.dart';
 import 'saved_lists_screen.dart';
 import 'trip_detail_screen.dart';
@@ -65,7 +66,11 @@ class _TripListScreenState extends State<TripListScreen> {
   Future<void> _openTrip(Trip trip) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => TripDetailScreen(trip: trip, db: widget.db),
+        builder: (_) => TripDetailScreen(
+          trip: trip,
+          db: widget.db,
+          onSignedOut: widget.onSignedOut,
+        ),
       ),
     );
     setState(_reload);
@@ -111,11 +116,13 @@ class _TripListScreenState extends State<TripListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.canvas,
-      floatingActionButton: AppFab(
-        heroTag: 'plan-trip',
-        onPressed: _createTrip,
-        icon: Icons.add_rounded,
-        label: 'Plan a trip',
+      bottomNavigationBar: AppBottomBar(
+        // Already home, so the slot marks where you are rather than offering
+        // to take you there.
+        onHome: null,
+        onAction: _createTrip,
+        actionLabel: 'Plan a trip',
+        onAccount: _openAccount,
       ),
       body: AppBackground(
         child: SafeArea(
@@ -139,7 +146,6 @@ class _TripListScreenState extends State<TripListScreen> {
                       child: _Greeting(
                         trips: trips,
                         onOpenSavedLists: _openSavedLists,
-                        onOpenAccount: _openAccount,
                       ),
                     ),
                     if (snapshot.hasError)
@@ -171,11 +177,14 @@ class _TripListScreenState extends State<TripListScreen> {
                         ),
                       ),
                       SliverPadding(
+                        // The bottom bar insets the body itself, so this is
+                        // ordinary breathing room rather than clearance for a
+                        // button floating over the last card.
                         padding: const EdgeInsets.fromLTRB(
                           AppSpacing.gutter,
                           0,
                           AppSpacing.gutter,
-                          110,
+                          AppSpacing.xl,
                         ),
                         sliver: SliverList.separated(
                           itemCount: trips.length,
@@ -209,12 +218,10 @@ class _TripListScreenState extends State<TripListScreen> {
 class _Greeting extends StatelessWidget {
   final List<Trip> trips;
   final VoidCallback onOpenSavedLists;
-  final VoidCallback onOpenAccount;
 
   const _Greeting({
     required this.trips,
     required this.onOpenSavedLists,
-    required this.onOpenAccount,
   });
 
   /// The soonest trip that hasn't finished yet, if any.
@@ -248,9 +255,9 @@ class _Greeting extends StatelessWidget {
             children: [
               const AppLogo(),
               const SizedBox(width: AppSpacing.md),
-              // Takes the slack rather than a Spacer: with two icon buttons and
-              // the count pill also on this row, a fixed-width brand overflows
-              // on a 360dp phone or at a large text scale.
+              // Takes the slack rather than a Spacer: with the saved-lists
+              // button and the count pill also on this row, a fixed-width
+              // brand overflows on a 360dp phone or at a large text scale.
               Expanded(
                 child: Text(
                   'Packmate',
@@ -273,12 +280,6 @@ class _Greeting extends StatelessWidget {
                 color: AppColors.textMuted,
                 tooltip: 'Saved lists',
                 onPressed: onOpenSavedLists,
-              ),
-              IconButton(
-                icon: const Icon(Icons.person_outline_rounded),
-                color: AppColors.textMuted,
-                tooltip: 'Account',
-                onPressed: onOpenAccount,
               ),
             ],
           ),

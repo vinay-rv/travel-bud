@@ -5,6 +5,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:packmate/data/database_helper.dart';
 import 'package:packmate/models/trip.dart';
 import 'package:packmate/screens/trip_list_screen.dart';
+import 'package:packmate/widgets/app_bottom_bar.dart';
 
 /// These screens read from a real (in-memory, FFI) database whose futures
 /// resolve on the *real* event loop, not flutter_test's fake-async zone.
@@ -90,7 +91,7 @@ void main() {
     await settle(tester);
 
     // Open the create screen via the FAB.
-    await tester.tap(find.byType(FloatingActionButton));
+    await tester.tap(find.byType(AppBottomBarAction));
     await settle(tester);
 
     // Enter a name and save.
@@ -108,7 +109,7 @@ void main() {
     await tester.pumpWidget(wrap());
     await settle(tester);
 
-    await tester.tap(find.byType(FloatingActionButton));
+    await tester.tap(find.byType(AppBottomBarAction));
     await settle(tester);
 
     // Save without entering a name.

@@ -7,6 +7,7 @@ import 'package:packmate/models/trip.dart';
 import 'package:packmate/models/stay.dart';
 import 'package:packmate/models/item.dart';
 import 'package:packmate/screens/trip_detail_screen.dart';
+import 'package:packmate/widgets/app_bottom_bar.dart';
 
 // See trip_flow_test.dart for why DB work runs inside runAsync and why we avoid
 // pumpAndSettle.
@@ -77,7 +78,7 @@ void main() {
   testWidgets('add an item and see it on the packing list', (tester) async {
     await openItemsTab(tester);
 
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Add Item'));
+    await tester.tap(find.widgetWithText(AppBottomBarAction, 'Add Item'));
     await settle(tester);
     await tester.enterText(find.byType(TextFormField), 'Passport');
     await tester.tap(find.widgetWithText(FilledButton, 'Add item'));

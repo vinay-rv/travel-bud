@@ -7,6 +7,7 @@ import '../models/trip.dart';
 import '../models/stay.dart';
 import '../models/transport_leg.dart';
 import '../models/item.dart';
+import '../models/bag.dart';
 import '../models/document.dart';
 import '../models/item_category.dart';
 import '../models/expense.dart';
@@ -26,7 +27,7 @@ import 'remote_store.dart';
 /// [DatabaseHelper.forTesting] with an in-memory path.
 class DatabaseHelper {
   static const _dbName = 'trip_inventory.db';
-  static const _dbVersion = 5;
+  static const _dbVersion = 6;
 
   static const tableTrip = 'trips';
   static const tableStay = 'stays';
@@ -36,6 +37,7 @@ class DatabaseHelper {
   static const tablePackingList = 'packing_lists';
   static const tablePackingListItem = 'packing_list_items';
   static const tableExpense = 'expenses';
+  static const tableBag = 'bags';
 
   /// Bookkeeping for the sync engine. These never hold user-visible content.
   static const tableSyncState = 'sync_state';
@@ -48,6 +50,7 @@ class DatabaseHelper {
     tableTrip,
     tableStay,
     tableTransport,
+    tableBag,
     tableItem,
     tableDocument,
     tablePackingList,
@@ -116,6 +119,9 @@ class DatabaseHelper {
         'ALTER TABLE $tableItem ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1',
       );
     }
+    if (!itemColumns.contains('bagId')) {
+      await db.execute('ALTER TABLE $tableItem ADD COLUMN bagId INTEGER');
+    }
 
     final catalogue = await db.rawQuery(
       "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'trigger')",
@@ -135,6 +141,9 @@ class DatabaseHelper {
     }
     if (!tables.contains(tableExpense)) {
       await _createExpenseTable(db);
+    }
+    if (!tables.contains(tableBag)) {
+      await _createBagTable(db);
     }
 
     // The v4 sync shape. Without this, a file stamped v4 but never actually
@@ -228,6 +237,11 @@ class DatabaseHelper {
     // v5 adds trip expenses.
     if (oldVersion < 5) {
       await _upgradeToV5(db);
+    }
+
+    // v6 adds bags, and the item column saying which one an item travels in.
+    if (oldVersion < 6) {
+      await _upgradeToV6(db);
     }
   }
 
@@ -366,6 +380,20 @@ class DatabaseHelper {
     await _createTombstoneTriggers(db);
   }
 
+  /// Existing items keep a null `bagId`, which reads as "not in a bag yet" —
+  /// exactly right for a list written before bags existed.
+  Future<void> _upgradeToV6(Database db) async {
+    await _createBagTable(db);
+    await _addSyncColumns(db, tableBag);
+    final itemColumns = (await db.rawQuery('PRAGMA table_info($tableItem)'))
+        .map((row) => row['name'] as String)
+        .toSet();
+    if (!itemColumns.contains('bagId')) {
+      await db.execute('ALTER TABLE $tableItem ADD COLUMN bagId INTEGER');
+    }
+    await _createTombstoneTriggers(db);
+  }
+
   Future<void> _createSchema(Database db, int version) async {
     await db.execute('''
       CREATE TABLE $tableTrip (
@@ -399,6 +427,7 @@ class DatabaseHelper {
       )
     ''');
 
+    await _createBagTable(db);
     await _createItemTable(db);
     await _createPackingListTables(db);
     await _createExpenseTable(db);
@@ -424,6 +453,19 @@ class DatabaseHelper {
     await _createTombstoneTriggers(db);
   }
 
+  /// Deleting a bag leaves its items behind, unassigned: losing the rucksack
+  /// from the list must not lose what was in it.
+  Future<void> _createBagTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS $tableBag (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tripId INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        FOREIGN KEY (tripId) REFERENCES $tableTrip (id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
   /// Items are trip-scoped only — no stay column, so nothing to cascade when a
   /// stay is deleted.
   Future<void> _createItemTable(Database db) async {
@@ -435,6 +477,7 @@ class DatabaseHelper {
         category TEXT NOT NULL DEFAULT 'other',
         quantity INTEGER NOT NULL DEFAULT 1,
         packed INTEGER NOT NULL DEFAULT 0,
+        bagId INTEGER,
         FOREIGN KEY (tripId) REFERENCES $tableTrip (id) ON DELETE CASCADE
       )
     ''');
@@ -578,10 +621,13 @@ class DatabaseHelper {
     final spec = remoteTableFor(table);
     if (remote == null || spec == null) return;
 
+    final refColumns = {for (final ref in spec.refs) ref.column};
+
     final wire = <String, Object?>{};
     for (final entry in row.entries) {
       if (localOnlyColumns.contains(entry.key)) continue;
       if (entry.key == spec.parentColumn) continue;
+      if (refColumns.contains(entry.key)) continue;
       wire[entry.key] = entry.value;
     }
     if (spec.hasParent) {
@@ -589,6 +635,14 @@ class DatabaseHelper {
           await _uuidOf(spec.parentTable!, row[spec.parentColumn!] as int);
       if (parentUuid == null) return;
       wire[spec.parentWireColumn!] = parentUuid;
+    }
+    for (final ref in spec.refs) {
+      final localId = row[ref.column] as int?;
+      // Absent from the map means "this write did not touch it", which only
+      // happens on paths that send the whole row, so a null here is the real
+      // value: no bag.
+      wire[ref.wireColumn] =
+          localId == null ? null : await _uuidOf(ref.table, localId);
     }
     await remote!.upsert(table, wire);
   }
@@ -648,12 +702,22 @@ class DatabaseHelper {
       for (final table in remoteTables) {
         final localIds = <String, int>{};
         for (final row in fetched[table.name]!) {
+          final wireRefs = {for (final ref in table.refs) ref.wireColumn};
+
           final values = <String, Object?>{};
           for (final entry in row.entries) {
             if (entry.key == table.parentWireColumn) continue;
+            if (wireRefs.contains(entry.key)) continue;
             if (entry.key == 'userId') continue;
             if (entry.key.endsWith('At') && entry.value == null) continue;
             values[entry.key] = entry.value;
+          }
+          for (final ref in table.refs) {
+            // Unresolved simply means no reference: unlike a missing parent
+            // this does not orphan the row, so it is kept either way.
+            final targetUuid = row[ref.wireColumn] as String?;
+            values[ref.column] =
+                targetUuid == null ? null : idsByUuid[ref.table]?[targetUuid];
           }
           if (table.hasParent) {
             final parentUuid = row[table.parentWireColumn!] as String?;
@@ -815,6 +879,34 @@ class DatabaseHelper {
     int tripId,
     bool packed, {
     ItemCategory? category,
+  }) {
+    return _setPackedWhere(
+      packed,
+      where: category == null ? 'tripId = ?' : 'tripId = ? AND category = ?',
+      whereArgs: category == null ? [tripId] : [tripId, category.name],
+    );
+  }
+
+  /// Packs or unpacks one bag's worth of items. A null [bagId] means the items
+  /// that are not in any bag — which is a group in the UI like any other.
+  Future<int> setBagItemsPacked(
+    int tripId,
+    bool packed, {
+    required int? bagId,
+  }) {
+    return _setPackedWhere(
+      packed,
+      where: bagId == null
+          ? 'tripId = ? AND bagId IS NULL'
+          : 'tripId = ? AND bagId = ?',
+      whereArgs: bagId == null ? [tripId] : [tripId, bagId],
+    );
+  }
+
+  Future<int> _setPackedWhere(
+    bool packed, {
+    required String where,
+    required List<Object?> whereArgs,
   }) async {
     final db = await database;
 
@@ -825,8 +917,8 @@ class DatabaseHelper {
       final affected = await db.query(
         tableItem,
         columns: ['id'],
-        where: category == null ? 'tripId = ?' : 'tripId = ? AND category = ?',
-        whereArgs: category == null ? [tripId] : [tripId, category.name],
+        where: where,
+        whereArgs: whereArgs,
       );
       for (final row in affected) {
         await _updateRow(tableItem, {'packed': packed ? 1 : 0}, row['id'] as int);
@@ -837,15 +929,59 @@ class DatabaseHelper {
     return db.update(
       tableItem,
       _stampChanged({'packed': packed ? 1 : 0}),
-      where: category == null
-          ? 'tripId = ?'
-          : 'tripId = ? AND category = ?',
-      whereArgs: category == null ? [tripId] : [tripId, category.name],
+      where: where,
+      whereArgs: whereArgs,
     );
   }
 
   Future<int> deleteItem(int id) async {
     return _deleteRow(tableItem, id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bags
+  // ---------------------------------------------------------------------------
+
+  Future<Bag> createBag(Bag bag) async {
+    final id = await _insertRow(tableBag, bag.toMap()..remove('id'));
+    return bag.copyWith(id: id);
+  }
+
+  /// The trip's bags, oldest first, so the order stays put as bags are added.
+  Future<List<Bag>> getBagsForTrip(int tripId) async {
+    final db = await database;
+    final maps = await db.query(tableBag,
+        where: 'tripId = ?', whereArgs: [tripId], orderBy: 'id ASC');
+    return maps.map(Bag.fromMap).toList();
+  }
+
+  Future<int> renameBag(int id, String name) async {
+    return _updateRow(tableBag, {'name': name}, id);
+  }
+
+  /// Removes a bag and empties out — rather than deletes — whatever was in it.
+  ///
+  /// `bagId` deliberately carries no foreign key: `ALTER TABLE ADD COLUMN`
+  /// cannot add one, so a migrated database could never have matched a fresh
+  /// install's `ON DELETE SET NULL`. Doing it here means both behave the same,
+  /// and the unassignment travels to the server like any other item change.
+  Future<int> deleteBag(int id) async {
+    final db = await database;
+    final orphaned = await db.query(
+      tableItem,
+      columns: ['id'],
+      where: 'bagId = ?',
+      whereArgs: [id],
+    );
+    for (final row in orphaned) {
+      await _updateRow(tableItem, {'bagId': null}, row['id'] as int);
+    }
+    return _deleteRow(tableBag, id);
+  }
+
+  /// Puts [itemId] in [bagId], or takes it out of every bag when null.
+  Future<int> setItemBag(int itemId, int? bagId) async {
+    return _updateRow(tableItem, {'bagId': bagId}, itemId);
   }
 
   // ---------------------------------------------------------------------------

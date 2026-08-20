@@ -19,8 +19,8 @@ export const app = await buildApp({ mailer });
 export async function resetDatabase(): Promise<void> {
   await prisma.$executeRawUnsafe(
     'TRUNCATE TABLE "verification_tokens", "refresh_tokens", "identities", ' +
-      '"packing_list_items", "packing_lists", "documents", "items", ' +
-      '"transport_legs", "stays", "trips", "users" CASCADE',
+      '"packing_list_items", "packing_lists", "documents", "items", "bags", ' +
+      '"expenses", "transport_legs", "stays", "trips", "users" CASCADE',
   );
   mailer.clear();
 }
