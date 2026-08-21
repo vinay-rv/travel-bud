@@ -143,19 +143,18 @@ class _IdentityCard extends StatelessWidget {
             width: 56,
             height: 56,
             alignment: Alignment.center,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.primary.withValues(alpha: 0.16),
-              border: Border.all(
-                color: AppColors.primary.withValues(alpha: 0.3),
-              ),
+              // Inverse of the canvas — a near-white disc with a dark initial —
+              // so the one filled shape on the screen is monochrome, not tinted.
+              color: AppColors.text,
             ),
             child: Text(
               _initial,
               style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
-                color: AppColors.primary,
+                color: AppColors.canvas,
               ),
             ),
           ),

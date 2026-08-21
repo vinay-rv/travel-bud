@@ -182,10 +182,6 @@ class ChecklistViewState extends State<ChecklistView>
     reload();
   }
 
-  Future<void> _setQuantity(Item item, int quantity) async {
-    await _db.setItemQuantity(item.id!, quantity);
-    reload();
-  }
 
   Future<void> _setAllPacked(bool packed) async {
     await _db.setAllItemsPacked(widget.tripId, packed);
@@ -303,6 +299,28 @@ class ChecklistViewState extends State<ChecklistView>
     );
     if (name == null) return;
 
+    // Saving the same name again should replace that list, not pile up an
+    // identical copy each time. Match on the trimmed name, case-insensitively.
+    final target = name.trim().toLowerCase();
+    final existing = (await _db.getPackingLists())
+        .where((l) => l.name.trim().toLowerCase() == target)
+        .toList();
+    if (existing.isNotEmpty) {
+      if (!mounted) return;
+      final replace = await confirmDestructive(
+        context,
+        title: 'Replace saved list?',
+        message:
+            'A saved list called "$name" already exists. Replacing it updates '
+            'it to these ${items.length} items.',
+        confirmLabel: 'Replace',
+      );
+      if (!replace) return;
+      for (final list in existing) {
+        await _db.deletePackingList(list.id!);
+      }
+    }
+
     await _db.savePackingList(name, items);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -379,32 +397,13 @@ class ChecklistViewState extends State<ChecklistView>
           children: [
             _PackingSummary(packed: packed, total: items.length),
             const SizedBox(height: AppSpacing.md),
-            Row(
-              children: [
-                Expanded(
-                  child: AppSecondaryButton(
-                    label: 'Save as list',
-                    icon: Icons.bookmark_add_outlined,
-                    onPressed: () => _saveAsList(items),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: AppSecondaryButton(
-                    label: 'Use a saved list',
-                    icon: Icons.library_add_outlined,
-                    accent: AppColors.violet,
-                    onPressed: _useSavedList,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.xl),
             _ListHeader(
               groupBy: _groupBy,
               allPacked: allPacked,
               onGroupByChanged: (value) => setState(() => _groupBy = value),
               onPackAll: () => _setAllPacked(!allPacked),
+              onSaveAsList: () => _saveAsList(items),
+              onUseSavedList: _useSavedList,
             ),
             const SizedBox(height: AppSpacing.md),
             for (final group in groups) ...[
@@ -415,7 +414,6 @@ class ChecklistViewState extends State<ChecklistView>
                 // repeating it on every row would be noise.
                 showBagOnRows: _groupBy == _GroupBy.category,
                 onToggle: _toggle,
-                onQuantity: _setQuantity,
                 onEdit: _edit,
                 onDelete: _confirmDelete,
                 onMoveToBag: (item) => _moveToBag(item, data.bags),
@@ -427,7 +425,7 @@ class ChecklistViewState extends State<ChecklistView>
                     ? null
                     : () => _confirmDeleteBag(group.bag!, group.items.length),
               ),
-              const SizedBox(height: AppSpacing.lg),
+              const SizedBox(height: AppSpacing.md),
             ],
             if (_groupBy == _GroupBy.bag) _AddBagCard(onTap: _createBag),
           ],
@@ -447,52 +445,128 @@ class _ListHeader extends StatelessWidget {
   final bool allPacked;
   final ValueChanged<_GroupBy> onGroupByChanged;
   final VoidCallback onPackAll;
+  final VoidCallback onSaveAsList;
+  final VoidCallback onUseSavedList;
 
   const _ListHeader({
     required this.groupBy,
     required this.allPacked,
     required this.onGroupByChanged,
     required this.onPackAll,
+    required this.onSaveAsList,
+    required this.onUseSavedList,
   });
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Flexible(
-          child: Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final option in _GroupBy.values)
+        // A hugging pill, not a stretched one: the design sizes it to its two
+        // segments and lets the pack action take the rest of the row.
+        Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final option in _GroupBy.values)
+                _GroupByOption(
+                  option: option,
+                  selected: option == groupBy,
+                  onTap: () => onGroupByChanged(option),
+                ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: GestureDetector(
+            onTap: onPackAll,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Icon(
+                    allPacked
+                        ? Icons.remove_done_rounded
+                        : Icons.done_all_rounded,
+                    size: 15,
+                    color: allPacked ? AppColors.textMuted : AppColors.mint,
+                  ),
+                  const SizedBox(width: 5),
                   Flexible(
-                    child: _GroupByOption(
-                      option: option,
-                      selected: option == groupBy,
-                      onTap: () => onGroupByChanged(option),
+                    child: Text(
+                      allPacked ? 'Unpack all' : 'Pack all',
+                      maxLines: 1,
+                      overflow: TextOverflow.fade,
+                      softWrap: false,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: allPacked ? AppColors.textMuted : AppColors.mint,
+                      ),
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
-        const SizedBox(width: AppSpacing.sm),
-        AppTextAction(
-          label: allPacked ? 'Unpack all' : 'Pack all',
-          icon: allPacked ? Icons.remove_done_rounded : Icons.done_all_rounded,
-          color: allPacked ? AppColors.textMuted : AppColors.mint,
-          onPressed: onPackAll,
+        // Save-as-list and use-a-saved-list fold into one overflow, as in the
+        // design — the two actions the packing list has beyond the items.
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_horiz_rounded,
+              size: 19, color: AppColors.textMuted),
+          tooltip: 'List actions',
+          padding: const EdgeInsets.only(left: 2),
+          iconSize: 19,
+          splashRadius: 18,
+          onSelected: (value) {
+            if (value == 'save') onSaveAsList();
+            if (value == 'use') onUseSavedList();
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'save',
+              height: 44,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.bookmark_add_outlined,
+                      size: 18, color: AppColors.textMuted),
+                  SizedBox(width: 10),
+                  Flexible(
+                      child: Text('Save as list',
+                          maxLines: 1, overflow: TextOverflow.clip)),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'use',
+              height: 44,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.library_add_outlined,
+                      size: 18, color: AppColors.textMuted),
+                  SizedBox(width: 10),
+                  Flexible(
+                      child: Text('Use a saved list',
+                          maxLines: 1, overflow: TextOverflow.clip)),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 }
+
 
 /// Somewhere to name another bag, at the end of the bags rather than in the
 /// header — which is where you look once you have run out of them.
@@ -544,35 +618,20 @@ class _GroupByOption extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppRadius.pill),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 160),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: selected
-                  ? AppColors.primary.withValues(alpha: 0.16)
-                  : Colors.transparent,
+              color: selected ? AppColors.primary : Colors.transparent,
               borderRadius: BorderRadius.circular(AppRadius.pill),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  option.icon,
-                  size: 15,
-                  color: selected ? AppColors.primary : AppColors.textMuted,
-                ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    option.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                      color: selected ? AppColors.primary : AppColors.textMuted,
-                    ),
-                  ),
-                ),
-              ],
+            child: Text(
+              option.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                color: selected ? AppGradients.onFilled : AppColors.textMuted,
+              ),
             ),
           ),
         ),
@@ -590,62 +649,49 @@ class _PackingSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final done = packed == total;
-    final color = done ? AppColors.mint : AppColors.violet;
+    final theme = Theme.of(context);
+    final pct = total == 0 ? 0 : ((packed / total) * 100).round();
 
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              AppIconTile(
-                icon: done ? Icons.task_alt_rounded : Icons.backpack_rounded,
-                color: color,
+    // A slim inline row, not a card: a title, the percentage, and a thin bar.
+    // The one functional accent is the primary blue, matching the tab and the
+    // add button; colour otherwise stays in the category dots below.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              '$packed of $total packed',
+              style: theme.textTheme.titleMedium?.copyWith(fontSize: 15),
+            ),
+            const Spacer(),
+            Text(
+              '$pct%',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
               ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      done ? 'All packed' : 'Packing progress',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '$packed of $total items ready',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-              Text(
-                '${total == 0 ? 0 : ((packed / total) * 100).round()}%',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(color: color),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          AppProgressBar(
-            value: total == 0 ? 0 : packed / total,
-            color: color,
-          ),
-        ],
-      ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        AppProgressBar(
+          value: total == 0 ? 0 : packed / total,
+          color: AppColors.primary,
+        ),
+      ],
     );
   }
 }
 
-/// One section: a header with its own pack/unpack action, then its items.
+
+/// One section: an uppercase header with a pack toggle, then the items.
 class _GroupSection extends StatelessWidget {
   final _Group group;
   final List<Bag> bags;
   final bool showBagOnRows;
   final Future<void> Function(Item item, bool packed) onToggle;
-  final Future<void> Function(Item item, int quantity) onQuantity;
   final Future<void> Function(Item item) onEdit;
   final Future<void> Function(Item item) onDelete;
   final Future<void> Function(Item item) onMoveToBag;
@@ -661,7 +707,6 @@ class _GroupSection extends StatelessWidget {
     required this.bags,
     required this.showBagOnRows,
     required this.onToggle,
-    required this.onQuantity,
     required this.onEdit,
     required this.onDelete,
     required this.onMoveToBag,
@@ -674,48 +719,64 @@ class _GroupSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = group.color;
     final items = group.items;
+    final hasItems = items.isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(
-            left: AppSpacing.xs,
-            bottom: AppSpacing.sm,
-          ),
+          padding: const EdgeInsets.only(left: 2, right: 2, bottom: 6),
           child: Row(
             children: [
-              Icon(group.icon, size: 16, color: accent),
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: accent),
+              ),
               const SizedBox(width: AppSpacing.sm),
               Flexible(
                 child: Text(
-                  group.label,
+                  // Categories read as section labels, so they are upper-cased
+                  // as in the design; a user's bag name keeps its own casing.
+                  group.isBagGroup ? group.label : group.label.toUpperCase(),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.8,
+                    color: AppColors.textMuted,
+                  ),
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
               Text(
                 '${group.packedCount}/${items.length}',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: group.allPacked && items.isNotEmpty
-                      ? AppColors.mint
-                      : AppColors.textFaint,
-                ),
+                style: const TextStyle(fontSize: 12, color: AppColors.textFaint),
               ),
-              const Spacer(),
-              if (items.isNotEmpty)
-                AppTextAction(
-                  label: group.allPacked ? 'Unpack all' : 'Pack all',
-                  icon: group.allPacked
-                      ? Icons.remove_done_rounded
-                      : Icons.done_all_rounded,
-                  color: group.allPacked ? AppColors.textMuted : accent,
-                  onPressed: () => onPackAll(!group.allPacked),
+              // The pack toggle sits right beside the count, not adrift at the
+              // far edge of the row.
+              if (hasItems) ...[
+                const SizedBox(width: 2),
+                Tooltip(
+                  message: group.allPacked ? 'Unpack group' : 'Pack group',
+                  child: InkResponse(
+                    onTap: () => onPackAll(!group.allPacked),
+                    radius: 18,
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        group.allPacked
+                            ? Icons.remove_done_rounded
+                            : Icons.done_all_rounded,
+                        size: 16,
+                        color: AppColors.textFaint,
+                      ),
+                    ),
+                  ),
                 ),
+              ],
+              const Spacer(),
               if (onRenameBag != null && onDeleteBag != null)
                 AppRowMenu(
                   editLabel: 'Rename bag',
@@ -726,30 +787,33 @@ class _GroupSection extends StatelessWidget {
             ],
           ),
         ),
-        if (items.isEmpty)
+        if (!hasItems)
           _EmptyBagCard(accent: accent)
         else
-          AppCard(
-            padding: EdgeInsets.zero,
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                for (var i = 0; i < items.length; i++) ...[
-                  if (i > 0)
-                    const Divider(indent: 52, endIndent: AppSpacing.sm),
-                  _ItemRow(
-                    item: items[i],
-                    accent: accent,
-                    bags: bags,
-                    showBag: showBagOnRows,
-                    onToggle: (value) => onToggle(items[i], value),
-                    onQuantity: (value) => onQuantity(items[i], value),
-                    onEdit: () => onEdit(items[i]),
-                    onDelete: () => onDelete(items[i]),
-                    onMoveToBag: () => onMoveToBag(items[i]),
-                  ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Column(
+                children: [
+                  for (var i = 0; i < items.length; i++) ...[
+                    if (i > 0) const Divider(height: 1),
+                    _ItemRow(
+                      item: items[i],
+                      bags: bags,
+                      showBag: showBagOnRows,
+                      onToggle: (value) => onToggle(items[i], value),
+                      onEdit: () => onEdit(items[i]),
+                      onDelete: () => onDelete(items[i]),
+                      onMoveToBag: () => onMoveToBag(items[i]),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
       ],
@@ -757,8 +821,7 @@ class _GroupSection extends StatelessWidget {
   }
 }
 
-/// A bag that has been named but not filled. Shown rather than hidden: it is
-/// the one that still needs thinking about.
+/// A group that has been named but not filled (only bags can be empty).
 class _EmptyBagCard extends StatelessWidget {
   final Color accent;
 
@@ -766,19 +829,27 @@ class _EmptyBagCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppCard(
-      child: Row(
-        children: [
-          Icon(Icons.add_circle_outline_rounded,
-              size: 18, color: accent.withValues(alpha: 0.7)),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Text(
-              'Nothing in here yet',
-              style: Theme.of(context).textTheme.bodySmall,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Icon(Icons.add_circle_outline_rounded,
+                size: 18, color: accent.withValues(alpha: 0.7)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Nothing in here yet',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -786,22 +857,18 @@ class _EmptyBagCard extends StatelessWidget {
 
 class _ItemRow extends StatelessWidget {
   final Item item;
-  final Color accent;
   final List<Bag> bags;
   final bool showBag;
   final ValueChanged<bool> onToggle;
-  final ValueChanged<int> onQuantity;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onMoveToBag;
 
   const _ItemRow({
     required this.item,
-    required this.accent,
     required this.bags,
     required this.showBag,
     required this.onToggle,
-    required this.onQuantity,
     required this.onEdit,
     required this.onDelete,
     required this.onMoveToBag,
@@ -816,54 +883,79 @@ class _ItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bag = _bag;
+    // In category mode the tag names the bag (when there is one); in bag mode
+    // the section is the bag, so the tag names the category instead.
+    final String? tag =
+        showBag ? _bag?.name : item.category.label;
 
     return InkWell(
       onTap: () => onToggle(!item.packed),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.sm,
-          AppSpacing.xs,
-          AppSpacing.xs,
-          AppSpacing.xs,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
         child: Row(
           children: [
-            Checkbox(
-              value: item.packed,
-              onChanged: (value) => onToggle(value ?? false),
+            _PackCheck(
+              packed: item.packed,
+              onTap: () => onToggle(!item.packed),
             ),
+            const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
                 children: [
-                  AnimatedDefaultTextStyle(
-                    duration: const Duration(milliseconds: 180),
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: item.packed ? AppColors.textFaint : AppColors.text,
-                      decoration: item.packed
-                          ? TextDecoration.lineThrough
-                          : TextDecoration.none,
-                      decorationColor: AppColors.textFaint,
+                  Flexible(
+                    child: AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 180),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color:
+                            item.packed ? AppColors.textFaint : AppColors.text,
+                        decoration: item.packed
+                            ? TextDecoration.lineThrough
+                            : TextDecoration.none,
+                        decorationColor: AppColors.textFaint,
+                      ),
+                      child: Text(item.name,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),
-                    child: Text(item.name, maxLines: 2),
                   ),
-                  if (showBag && bag != null) ...[
-                    const SizedBox(height: 4),
-                    BagTag(name: bag.name, color: bagColor(bag.id)),
+                  if (tag != null) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        tag,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: AppColors.textFaint,
+                        ),
+                      ),
+                    ),
                   ],
                 ],
               ),
             ),
-            const SizedBox(width: AppSpacing.sm),
-            AppQuantityStepper(
-              quantity: item.quantity,
-              accent: accent,
-              onChanged: onQuantity,
-            ),
+            if (item.quantity > 1) ...[
+              const SizedBox(width: AppSpacing.sm),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+                child: Text(
+                  '\u00d7${item.quantity}',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+              ),
+            ],
             AppRowMenu(
               onEdit: onEdit,
               onDelete: onDelete,
@@ -876,6 +968,56 @@ class _ItemRow extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The round packing checkbox: a filled disc with a dark tick when packed, a
+/// hollow ring when not. Its own widget so a test can find and tap it.
+class PackCheck extends StatelessWidget {
+  final bool packed;
+  final VoidCallback onTap;
+
+  const PackCheck({super.key, required this.packed, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => _PackCheck(packed: packed, onTap: onTap);
+}
+
+class _PackCheck extends StatelessWidget {
+  final bool packed;
+  final VoidCallback onTap;
+
+  const _PackCheck({required this.packed, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      checked: packed,
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 22,
+          height: 22,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: packed ? AppColors.primary : Colors.transparent,
+            border: Border.all(
+              color: packed ? AppColors.primary : AppColors.borderStrong,
+              width: 1.5,
+            ),
+          ),
+          child: Icon(
+            Icons.check_rounded,
+            size: 14,
+            color: packed ? AppGradients.onFilled : Colors.transparent,
+          ),
         ),
       ),
     );

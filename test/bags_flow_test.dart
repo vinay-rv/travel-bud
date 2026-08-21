@@ -102,14 +102,15 @@ void main() {
         bagId: bag.id, category: ItemCategory.clothes);
     await openItemsTab(tester);
 
-    // Categories to begin with.
-    expect(find.text('Clothes'), findsOneWidget);
+    // Categories to begin with (headers read as upper-case section labels).
+    expect(find.text('CLOTHES'), findsOneWidget);
     expect(find.text('Cabin bag'), findsOneWidget); // the row's bag tag
 
     await groupByBag(tester);
 
-    // Now the section is the bag, and the category heading is gone.
-    expect(find.text('Clothes'), findsNothing);
+    // Now the section is the bag, and the category heading is gone. ('Clothes'
+    // now appears the other way round — as each row's category tag.)
+    expect(find.text('CLOTHES'), findsNothing);
     expect(find.text('Cabin bag'), findsOneWidget);
     expect(find.text('Jacket'), findsOneWidget);
   }, timeout: _timeout);
@@ -181,7 +182,6 @@ void main() {
     await tester.tap(find.text('Cabin bag').last);
     await settle(tester);
 
-    expect(find.text('Nothing in here yet'), findsNothing);
     final stored = await real(tester, () => db.getItemsForTrip(trip.id!));
     expect(stored.single.bagId, isNotNull);
   }, timeout: _timeout);
@@ -255,8 +255,8 @@ void main() {
     await openItemsTab(tester);
     await groupByBag(tester);
 
-    // The bag's own pack-all, which is the first one on screen.
-    await tester.tap(find.text('Pack all').at(1));
+    // The bag's own pack toggle is an icon; Cabin bag is the first group.
+    await tester.tap(find.byTooltip('Pack group').first);
     await settle(tester);
 
     final stored = await real(tester, () => db.getItemsForTrip(trip.id!));

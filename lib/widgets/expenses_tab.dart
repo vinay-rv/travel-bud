@@ -142,41 +142,41 @@ class _TotalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // No icon tile, no coloured amount: a label, the big plain total, and the
+    // count. The money is the loudest thing on the card by size, not by hue.
     return AppCard(
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AppIconTile(
-            icon: Icons.account_balance_wallet_outlined,
-            color: AppColors.amber,
+          Text(
+            'SPENT ON THIS TRIP',
+            style: theme.textTheme.labelSmall,
           ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Spent on this trip',
-                  style: Theme.of(context).textTheme.titleMedium,
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
+                child: Text(
+                  formatMinor(total),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -1,
+                    color: AppColors.text,
+                  ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '$count expense${count == 1 ? '' : 's'}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Flexible(
-            child: Text(
-              formatMinor(total),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(color: AppColors.amber),
-            ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Text(
+                '$count expense${count == 1 ? '' : 's'}',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
           ),
         ],
       ),

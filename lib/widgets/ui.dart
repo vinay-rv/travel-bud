@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// Ambient background: the flat canvas plus two soft accent glows, so screens
-/// have depth without any heavy chrome.
+/// The screen background: a single flat canvas.
+///
+/// The monochrome design carries no colour behind its content — colour lives
+/// only in the small dots on the cards — so this is deliberately plain. The
+/// [glow] parameter is kept so call sites need not change; it is ignored.
 class AppBackground extends StatelessWidget {
   final Widget child;
   final Color glow;
@@ -18,48 +21,7 @@ class AppBackground extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: const BoxDecoration(color: AppColors.canvas),
-      child: Stack(
-        children: [
-          Positioned(
-            top: -180,
-            right: -120,
-            child: _Glow(color: glow, size: 380, opacity: 0.16),
-          ),
-          Positioned(
-            top: 220,
-            left: -160,
-            child: _Glow(color: AppColors.mint, size: 320, opacity: 0.07),
-          ),
-          Positioned.fill(child: child),
-        ],
-      ),
-    );
-  }
-}
-
-class _Glow extends StatelessWidget {
-  final Color color;
-  final double size;
-  final double opacity;
-
-  const _Glow({required this.color, required this.size, required this.opacity});
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: [
-              color.withValues(alpha: opacity),
-              color.withValues(alpha: 0),
-            ],
-          ),
-        ),
-      ),
+      child: child,
     );
   }
 }
@@ -513,7 +475,7 @@ Future<bool> confirmDestructive(
           child: FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: Colors.transparent,
-              foregroundColor: Colors.white,
+              foregroundColor: AppGradients.onFilled,
               shadowColor: Colors.transparent,
               elevation: 0,
               minimumSize: const Size(0, 46),
@@ -860,7 +822,7 @@ class AppPrimaryButton extends StatelessWidget {
         style: FilledButton.styleFrom(
           backgroundColor: Colors.transparent,
           disabledBackgroundColor: Colors.transparent,
-          foregroundColor: Colors.white,
+          foregroundColor: AppGradients.onFilled,
           shadowColor: Colors.transparent,
           elevation: 0,
         ),
@@ -870,7 +832,7 @@ class AppPrimaryButton extends StatelessWidget {
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.2,
-                  color: Colors.white,
+                  color: AppGradients.onFilled,
                 ),
               )
             : Row(
@@ -914,7 +876,7 @@ class AppFab extends StatelessWidget {
         heroTag: heroTag,
         onPressed: onPressed,
         backgroundColor: Colors.transparent,
-        foregroundColor: Colors.white,
+        foregroundColor: AppGradients.onFilled,
         elevation: 0,
         focusElevation: 0,
         hoverElevation: 0,
@@ -949,11 +911,14 @@ class AppSecondaryButton extends StatelessWidget {
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(AppRadius.md),
+        // Neutral surface with a hairline, matching the cards. Colour is only
+        // the small leading icon, in the accent — otherwise the monochrome
+        // palette would be broken by a tinted slab.
         child: Ink(
           decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.10),
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(AppRadius.md),
-            border: Border.all(color: accent.withValues(alpha: 0.28)),
+            border: Border.all(color: AppColors.border),
           ),
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.md,
@@ -969,8 +934,8 @@ class AppSecondaryButton extends StatelessWidget {
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: accent,
+                  style: const TextStyle(
+                    color: AppColors.text,
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                   ),

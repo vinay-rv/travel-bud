@@ -113,18 +113,19 @@ void main() {
     await seedItems(tester);
     await openItemsTab(tester);
 
-    expect(find.text('Clothes'), findsOneWidget);
+    expect(find.text('CLOTHES'), findsOneWidget);
     // Categories with nothing in them stay hidden.
-    expect(find.text('Hygiene'), findsNothing);
+    expect(find.text('HYGIENE'), findsNothing);
     expect(find.text('0/2'), findsOneWidget);
 
     // The last group sits below the fold on a small phone.
     await tester.drag(find.byType(ListView).last, const Offset(0, -200));
     await settle(tester);
-    expect(find.text('Electronics'), findsOneWidget);
+    expect(find.text('ELECTRONICS'), findsOneWidget);
   }, timeout: _timeout);
 
-  testWidgets('the + and − steppers change how many to bring', (tester) async {
+  testWidgets('quantity shows as a read-only badge and is edited on the form',
+      (tester) async {
     await real(
       tester,
       () => db.createItem(Item(
@@ -135,19 +136,25 @@ void main() {
       )),
     );
     await openItemsTab(tester);
-    expect(find.text('2'), findsOneWidget);
 
+    // The row carries a "×N" badge for more than one, and no stepper.
+    expect(find.text('×2'), findsOneWidget);
+    expect(find.byType(AppQuantityStepper), findsNothing);
+
+    // Quantity is changed on the item form, which is where the stepper lives.
+    await tester.tap(find.byIcon(Icons.more_vert).first);
+    await settle(tester);
+    await tester.tap(find.text('Edit'));
+    await settle(tester);
     await tapStepper(tester, Icons.add_rounded);
-    expect((await real(tester, () => db.getItemsForTrip(trip.id!))).single.quantity, 3);
+    await tester.tap(find.widgetWithText(FilledButton, 'Save changes'));
+    await settle(tester);
 
-    await tapStepper(tester, Icons.remove_rounded);
-    await tapStepper(tester, Icons.remove_rounded);
-    final items = await real(tester, () => db.getItemsForTrip(trip.id!));
-    expect(items.single.quantity, 1);
-
-    // At one, the minus is disabled rather than deleting the item.
-    await tapStepper(tester, Icons.remove_rounded);
-    expect((await real(tester, () => db.getItemsForTrip(trip.id!))).single.quantity, 1);
+    expect(find.text('×3'), findsOneWidget);
+    expect(
+      (await real(tester, () => db.getItemsForTrip(trip.id!))).single.quantity,
+      3,
+    );
   }, timeout: _timeout);
 
   testWidgets('Pack all packs just that category, then offers Unpack all',
@@ -155,8 +162,8 @@ void main() {
     await seedItems(tester);
     await openItemsTab(tester);
 
-    // The first "Pack all" belongs to the list header; the Clothes one follows.
-    await tester.tap(find.text('Pack all').at(1));
+    // The group's pack toggle is an icon; the Clothes group is first on screen.
+    await tester.tap(find.byTooltip('Pack group').first);
     await settle(tester);
 
     final items = await real(tester, () => db.getItemsForTrip(trip.id!));
@@ -164,7 +171,8 @@ void main() {
     expect(packed, containsAll(['T-shirts', 'Jacket']));
     expect(packed, isNot(contains('Charger')));
     expect(find.text('2/2'), findsOneWidget);
-    expect(find.text('Unpack all'), findsOneWidget);
+    // A fully packed group offers to unpack itself.
+    expect(find.byTooltip('Unpack group'), findsOneWidget);
   }, timeout: _timeout);
 
   testWidgets('the header packs and then unpacks every item', (tester) async {
@@ -192,6 +200,8 @@ void main() {
     await seedItems(tester);
     await openItemsTab(tester);
 
+    await tester.tap(find.byTooltip('List actions'));
+    await settle(tester);
     await tester.tap(find.text('Save as list'));
     await settle(tester);
     await tester.enterText(find.byType(TextField), 'Hill trek');

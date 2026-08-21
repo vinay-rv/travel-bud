@@ -67,7 +67,9 @@ class _TripDetailScreenState extends State<TripDetailScreen>
   late final TabController _tabController;
   late Trip _trip;
 
-  Color get _accent => accentFor(_trip.id ?? 0);
+  // The design uses one fixed blue for chrome (tab underline, etc.); the
+  // rotating trip colours survive only as the small dots on cards.
+  Color get _accent => AppColors.primary;
 
   @override
   void initState() {
@@ -246,100 +248,60 @@ class _DetailHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final status = tripStatus(trip.startDate, trip.endDate);
     final days = tripLengthInDays(trip.startDate, trip.endDate);
 
+    // Compact: no hero card. The name and dates sit inline between the back
+    // arrow and the edit control, so the tabs and their content start high on
+    // the screen — colour stays out of the chrome entirely.
     return Padding(
       padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
         AppSpacing.xs,
-        AppSpacing.md,
-        0,
+        AppSpacing.sm,
+        AppSpacing.sm,
+        AppSpacing.sm,
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back_rounded),
-                color: AppColors.textMuted,
-                tooltip: 'Back',
-                onPressed: onBack,
-              ),
-              const Spacer(),
-              Text('Trip details', style: theme.textTheme.labelSmall),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.tune_rounded),
-                color: AppColors.textMuted,
-                tooltip: 'Edit trip',
-                onPressed: onEdit,
-              ),
-            ],
+          IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            color: AppColors.textMuted,
+            tooltip: 'Back',
+            onPressed: onBack,
           ),
-          const SizedBox(height: AppSpacing.xs),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-            child: AppCard(
-              padding: const EdgeInsets.all(AppSpacing.xl),
-              color: Color.alphaBlend(
-                accent.withValues(alpha: 0.09),
-                AppColors.surface,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          trip.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.headlineSmall,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.md),
-                      AppPill(label: status.label, color: status.color),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.calendar_today_rounded,
-                        size: 15,
-                        color: AppColors.textMuted,
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          formatDateRange(trip.startDate, trip.endDate),
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: AppColors.text,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '$days day${days == 1 ? '' : 's'}',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: accent,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  trip.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge,
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  '${formatDateRange(trip.startDate, trip.endDate)} · '
+                  '$days day${days == 1 ? '' : 's'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
             ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          IconButton(
+            icon: const Icon(Icons.tune_rounded),
+            color: AppColors.textMuted,
+            tooltip: 'Edit trip',
+            onPressed: onEdit,
           ),
         ],
       ),
     );
   }
 }
+
 
 /// Segmented control that keeps its edges aligned with the content cards
 /// instead of running flush against the screen.
@@ -661,20 +623,30 @@ class _StayCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const AppIconTile(
-                icon: Icons.hotel_rounded,
-                color: AppColors.mint,
-              ),
-              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      stay.hotelName,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
+                    Row(
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: accentFor(stay.id ?? 0),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Flexible(
+                          child: Text(
+                            stay.hotelName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -683,17 +655,17 @@ class _StayCard extends StatelessWidget {
                           : '$nights night${nights == 1 ? '' : 's'}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    if (reminderAt != null) ...[
-                      const SizedBox(height: 7),
-                      AppPill(
-                        label: 'Reminder ${formatTime(reminderAt)}',
-                        icon: Icons.notifications_active_outlined,
-                        color: AppColors.amber,
-                      ),
-                    ],
                   ],
                 ),
               ),
+              if (reminderAt != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                AppPill(
+                  label: formatTime(reminderAt),
+                  icon: Icons.notifications_active_outlined,
+                  color: AppColors.amber,
+                ),
+              ],
               AppRowMenu(onEdit: onEdit, onDelete: onDelete),
             ],
           ),
@@ -923,6 +895,12 @@ class _TransportCard extends StatelessWidget {
     required this.onDelete,
   });
 
+  static Color _colorFor(TransportType type) => switch (type) {
+    TransportType.flight => AppColors.amber,
+    TransportType.train => AppColors.mint,
+    TransportType.bus => AppColors.violet,
+  };
+
   static IconData _iconFor(TransportType type) => switch (type) {
     TransportType.flight => Icons.flight_rounded,
     TransportType.train => Icons.train_rounded,
@@ -948,7 +926,7 @@ class _TransportCard extends StatelessWidget {
             children: [
               AppIconTile(
                 icon: _iconFor(leg.type),
-                color: AppColors.amber,
+                color: _colorFor(leg.type),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(

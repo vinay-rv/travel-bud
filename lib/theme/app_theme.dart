@@ -6,15 +6,16 @@ import 'package:flutter/services.dart';
 class AppColors {
   AppColors._();
 
-  // Canvas + surfaces (cool near-black, so accents read as light, not neon).
-  static const canvas = Color(0xFF0A0C11);
-  static const canvasTint = Color(0xFF111621);
-  static const surface = Color(0xFF151922);
-  static const surfaceAlt = Color(0xFF1B2130);
-  static const surfaceHigh = Color(0xFF222937);
+  // Canvas + surfaces. Neutral greys, not blue-tinted: colour lives only in the
+  // small category/status dots, so the surfaces stay out of their way.
+  static const canvas = Color(0xFF0A0A0B);
+  static const canvasTint = Color(0xFF0F0F11);
+  static const surface = Color(0xFF141416);
+  static const surfaceAlt = Color(0xFF1C1C1F);
+  static const surfaceHigh = Color(0xFF242428);
 
-  static const border = Color(0xFF252C3A);
-  static const borderStrong = Color(0xFF323B4D);
+  static const border = Color(0xFF26262A);
+  static const borderStrong = Color(0xFF3A3A3F);
 
   // Accents.
   static const primary = Color(0xFF8CA6FF);
@@ -29,9 +30,9 @@ class AppColors {
   static const steel = Color(0xFF9AAAC9);
 
   // Text.
-  static const text = Color(0xFFEDF0F7);
-  static const textMuted = Color(0xFF98A2B6);
-  static const textFaint = Color(0xFF6B7488);
+  static const text = Color(0xFFF5F5F4);
+  static const textMuted = Color(0xFF9C9C9F);
+  static const textFaint = Color(0xFF66666B);
 }
 
 /// Fills for the primary call-to-action surfaces. Buttons are the one place
@@ -41,20 +42,21 @@ class AppColors {
 class AppGradients {
   AppGradients._();
 
+  // Flat, not a gradient: the design fills its one call-to-action with the
+  // primary accent straight, and reads the near-black [onPrimary] on top.
   static const primaryButton = LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-    colors: [Color(0xFF6379EA), Color(0xFF4257CE)],
+    colors: [AppColors.primary, AppColors.primary],
   );
 
   static const destructiveButton = LinearGradient(
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-    colors: [Color(0xFFD75C72), Color(0xFFB93E55)],
+    colors: [AppColors.rose, AppColors.rose],
   );
 
+  /// Text/icon colour on top of a filled primary or destructive button.
+  static const onFilled = Color(0xFF0B1020);
+
   /// Hairline highlight along the top edge, so the fill reads as lit.
-  static const buttonHighlight = Color(0x26FFFFFF);
+  static const buttonHighlight = Color(0x14FFFFFF);
 }
 
 /// Corner radii, in one place so cards, fields, and sheets stay in step.

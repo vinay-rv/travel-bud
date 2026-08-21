@@ -99,11 +99,11 @@ void main() {
     await openItemsTab(tester);
     expect(find.text('Charger'), findsOneWidget);
 
-    // Tap the checkbox to pack it. Scrolled into view first: the bottom bar
-    // covers the foot of the list on a short phone.
-    await tester.ensureVisible(find.byType(Checkbox).first);
+    // Tap the row to pack it (the round check and the whole row both toggle).
+    // Scrolled into view first: the bottom bar covers the foot of the list.
+    await tester.ensureVisible(find.text('Charger'));
     await settle(tester);
-    await tester.tap(find.byType(Checkbox).first);
+    await tester.tap(find.text('Charger'));
     await settle(tester);
 
     final items = await real(tester, () => db.getItemsForTrip(trip.id!));
@@ -153,4 +153,5 @@ void main() {
     final items = await real(tester, () => db.getItemsForTrip(trip.id!));
     expect(items, isEmpty);
   }, timeout: _timeout);
+
 }

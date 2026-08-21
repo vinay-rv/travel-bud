@@ -269,11 +269,14 @@ class _Greeting extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
+              // Neutral outline, not a coloured chip: on the trips screen the
+              // count is just a fact, so it stays out of the dots' way.
               AppPill(
                 label: trips.isEmpty
                     ? 'Empty'
                     : '${trips.length} trip${trips.length == 1 ? '' : 's'}',
                 icon: Icons.map_outlined,
+                color: AppColors.textMuted,
               ),
               IconButton(
                 icon: const Icon(Icons.bookmarks_outlined),
@@ -342,118 +345,102 @@ class _TripCard extends StatelessWidget {
     final nights = tripLengthInDays(trip.startDate, trip.endDate) - 1;
     final dimmed = status.phase == TripPhase.past;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(color: AppColors.border),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color.alphaBlend(
-                  accent.withValues(alpha: dimmed ? 0.04 : 0.10),
-                  AppColors.surface,
-                ),
-                AppColors.surface,
-              ],
+    // Flat neutral surface — no accent wash, no icon tile. Colour is a single
+    // status dot in the footer, everything else is type.
+    return Opacity(
+      opacity: dimmed ? 0.55 : 1,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          child: Ink(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.border),
             ),
-          ),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.lg,
-                  AppSpacing.sm,
-                  AppSpacing.md,
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AppIconTile(
-                      icon: Icons.location_on_rounded,
-                      color: dimmed ? AppColors.textFaint : accent,
-                    ),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            trip.name,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              color: dimmed
-                                  ? AppColors.textMuted
-                                  : AppColors.text,
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              trip.name,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleLarge,
                             ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            formatDateRange(trip.startDate, trip.endDate),
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ],
+                            const SizedBox(height: 3),
+                            Text(
+                              formatDateRange(trip.startDate, trip.endDate),
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    AppRowMenu(onEdit: onEdit, onDelete: onDelete),
-                  ],
-                ),
-              ),
-              const Divider(indent: AppSpacing.lg, endIndent: AppSpacing.lg),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.md,
-                  AppSpacing.lg,
-                  AppSpacing.md,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Row(
-                        children: [
-                          Flexible(
-                            child: AppPill(
-                              label: status.label,
-                              color: status.color,
-                              icon: status.phase == TripPhase.ongoing
-                                  ? Icons.play_arrow_rounded
-                                  : Icons.schedule_rounded,
-                            ),
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                          Flexible(
-                            child: AppPill(
-                              label: nights == 0
-                                  ? 'Day trip'
-                                  : '$nights night${nights == 1 ? '' : 's'}',
-                              color: AppColors.textMuted,
-                              icon: Icons.bedtime_outlined,
-                            ),
-                          ),
-                        ],
+                      AppRowMenu(onEdit: onEdit, onDelete: onDelete),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const Divider(height: 1),
+                  const SizedBox(height: AppSpacing.md),
+                  Row(
+                    children: [
+                      _StatusDot(color: status.color),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        status.label,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12.5,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Icon(
-                      Icons.arrow_forward_rounded,
-                      size: 18,
-                      color: dimmed ? AppColors.textFaint : accent,
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: AppSpacing.lg),
+                      Text(
+                        nights == 0
+                            ? 'Day trip'
+                            : '$nights night${nights == 1 ? '' : 's'}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const Spacer(),
+                      const Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 17,
+                        color: AppColors.textMuted,
+                      ),
+                    ],
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 }
+
+/// The small coloured dot that carries a trip or stay's status.
+class _StatusDot extends StatelessWidget {
+  final Color color;
+
+  const _StatusDot({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+    );
+  }
+}
+
